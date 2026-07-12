@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">NanChat</string>
+    <string name="hello_world">Hello, %1$s!</string>
+    <string name="notification_channel_messages">Messages</string>
+</resources>

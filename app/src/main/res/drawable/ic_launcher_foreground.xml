@@ -1,0 +1,20 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="272.1"
+    android:viewportHeight="272.1">
+    <!-- Adaptive icon launchers only guarantee the inner ~66-72dp of the 108dp canvas stays
+         unclipped, so the artwork (natively 181.39 units wide) is padded out to a 272.1 viewport
+         and centered, instead of filling it edge to edge and getting cropped/zoomed by the mask. -->
+    <group android:translateX="45.36" android:translateY="45.36">
+        <path
+            android:fillColor="#1677FF"
+            android:pathData="M145.74,181.39H35.7A35.73,35.73,0,0,1,0,145.64V35.75A35.73,35.73,0,0,1,35.7,0h110a35.73,35.73,0,0,1,35.7,35.75V145.91A35.84,35.84,0,0,1,145.74,181.39Z" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M90.71,33.41C54,33.41,24.13,58.24,24.13,88.85c0,18.91,11.62,36.45,30.66,46.62a2,2,0,0,1,.86,2.62c-1.75,3.44,-3.7,5.88,-6.8,9.64A2,2,0,0,0,51,150.85c7,-2.41,16.79,-6.51,20.17,-8.44a2,2,0,0,1,1.44,-.21,78.3,78.3,0,0,0,18,2.11c36.78,0,66.58,-24.83,66.58,-55.46S127.49,33.41,90.71,33.41Z" />
+        <path
+            android:fillColor="#1677FF"
+            android:pathData="M126.28,97.8a10.07,10.07,0,0,1,-14.22,0c-5.32,-5.33,-8.87,-5.33,-14.2,0a10.06,10.06,0,0,1,-14.2,0h0c-5.33,-5.33,-8.88,-5.33,-14.2,0a10.05,10.05,0,1,1,0,-14.22h0c5.32,5.33,8.87,5.33,14.2,0a10,10,0,0,1,14.2,0h0c5.33,5.33,8.88,5.33,14.2,0a10.05,10.05,0,0,1,14.22,14.21Z" />
+    </group>
+</vector>

@@ -1,0 +1,550 @@
+package com.nanchat.app.ui
+
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
+import androidx.compose.material.icons.automirrored.outlined.Chat
+import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.nanchat.app.R
+import androidx.wear.compose.material3.AppScaffold
+import androidx.wear.compose.material3.Button
+import androidx.wear.compose.material3.ButtonDefaults
+import androidx.wear.compose.material3.Card
+import androidx.wear.compose.material3.FilledTonalButton
+import androidx.wear.compose.material3.Icon
+import androidx.wear.compose.material3.MaterialTheme
+import androidx.wear.compose.material3.MotionScheme
+import androidx.wear.compose.material3.OutlinedIconButton
+import androidx.wear.compose.material3.ProgressIndicatorDefaults
+import androidx.wear.compose.material3.ScreenScaffold
+import androidx.wear.compose.material3.SegmentedCircularProgressIndicator
+import androidx.wear.compose.material3.Text
+import androidx.wear.compose.material3.TextButton
+import com.nanchat.app.crypto.Bip39
+import com.nanchat.app.crypto.NanoCrypto
+import kotlinx.coroutines.launch
+import kotlin.math.absoluteValue
+
+private const val CREATE_WALLET_ENABLED = false
+
+private sealed interface Step {
+    data object Intro : Step
+    data class Import(val words: List<String>, val index: Int) : Step
+    data class Create(val seed: String, val words: List<String>, val index: Int) : Step
+}
+
+private data class IntroSlide(
+    val icon: ImageVector?,
+    val title: String,
+    val description: String,
+    // Flat pastel background per slide, matching the Pixel Watch setup look (no gradient/gloss).
+    val backgroundColor: Color,
+    // Only the first slide uses the real app logo instead of a generic Material icon.
+    val useAppLogo: Boolean = false,
+)
+
+private val introSlides = listOf(
+    IntroSlide(
+        icon = null,
+        title = "NanChat",
+        description = "Fast & private messaging",
+        backgroundColor = Color(0xFFBFD9EE),
+        useAppLogo = true,
+    ),
+    IntroSlide(
+        icon = Icons.Outlined.Lock,
+        title = "Encrypted",
+        description = "Only you can read your chats",
+        backgroundColor = Color(0xFFA9CBEE),
+    ),
+    IntroSlide(
+        icon = Icons.Outlined.Bolt,
+        title = "Your identity",
+        description = "No accounts - just your key",
+        backgroundColor = Color(0xFFC4C0EE),
+    ),
+)
+
+@Composable
+fun OnboardingScreen(
+    error: String?,
+    onImportMnemonic: (List<String>) -> Unit,
+    onCreateConfirmed: (String) -> Unit,
+    onDismissError: () -> Unit,
+) {
+    var step by remember { mutableStateOf<Step>(Step.Intro) }
+
+    when (val s = step) {
+        is Step.Intro -> IntroScreen(
+            onGetStarted = { step = Step.Import(List(Bip39.WORD_COUNT) { "" }, 0) },
+            onCreate = if (CREATE_WALLET_ENABLED) {
+                {
+                    val seed = NanoCrypto.generateSeed()
+                    step = Step.Create(seed, Bip39.seedToMnemonic(seed), 0)
+                }
+            } else null,
+            error = error,
+        )
+        is Step.Import -> WordEntryScreen(
+            index = s.index,
+            initialValue = s.words[s.index],
+            error = error,
+            onDismissError = onDismissError,
+            onBack = {
+                if (s.index == 0) step = Step.Intro
+                else step = s.copy(index = s.index - 1)
+            },
+            onNext = { word ->
+                val words = s.words.toMutableList().apply { this[s.index] = word }
+                if (s.index == Bip39.WORD_COUNT - 1) {
+                    onImportMnemonic(words)
+                    step = s.copy(words = words)
+                } else {
+                    step = Step.Import(words, s.index + 1)
+                }
+            },
+        )
+        is Step.Create -> WordDisplayScreen(
+            index = s.index,
+            word = s.words[s.index],
+            onBack = {
+                if (s.index == 0) step = Step.Intro
+                else step = s.copy(index = s.index - 1)
+            },
+            onNext = {
+                if (s.index == Bip39.WORD_COUNT - 1) {
+                    onCreateConfirmed(s.seed)
+                } else {
+                    step = s.copy(index = s.index + 1)
+                }
+            },
+            isLast = s.index == Bip39.WORD_COUNT - 1,
+        )
+    }
+}
+
+/** First-launch presentation carousel - swipe through what NanChat is, then go straight into the
+ * seed import flow (no separate "Import" choice screen). Wallet creation stays reachable only if
+ * [CREATE_WALLET_ENABLED] is flipped on, as a secondary action on the last slide.
+ *
+ * Visual style follows the Pixel Watch "Google style" setup pattern: a full-bleed photo
+ * background per slide, a white icon bubble, bold title, a subtle bottom progress arc, and a
+ * pill-shaped white CTA button on the final slide. */
+@Composable
+private fun IntroScreen(onGetStarted: () -> Unit, onCreate: (() -> Unit)?, error: String?) {
+    val pagerState = rememberPagerState(pageCount = { introSlides.size })
+    val scope = rememberCoroutineScope()
+    val isLastPage = pagerState.currentPage == introSlides.lastIndex
+    val spatialSpec = MotionScheme.expressive().defaultSpatialSpec<Float>()
+
+    // Fade + rise the whole carousel in on first appearance, Google-style entrance motion.
+    val entrance = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { entrance.animateTo(1f, MotionScheme.expressive().slowSpatialSpec()) }
+
+    AppScaffold {
+        ScreenScaffold { contentPadding ->
+            Box(modifier = Modifier.fillMaxSize()) {
+                // Full-bleed flat pastel background per slide, crossfading as you swipe.
+                HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(introSlides[page].backgroundColor),
+                    )
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(contentPadding)
+                        .graphicsLayer {
+                            alpha = entrance.value
+                            translationY = (1f - entrance.value) * 24f
+                        },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    HorizontalPager(state = pagerState, modifier = Modifier.weight(1f).fillMaxWidth()) { page ->
+                        val slide = introSlides[page]
+                        // Content scales/fades with swipe progress instead of snapping between pages.
+                        val pageFraction = 1f - pagerState.getOffsetDistanceInPages(page).absoluteValue.coerceIn(0f, 1f)
+                        // A Column with fillMaxSize()+Arrangement.Center would constrain each child to
+                        // the remaining space and silently truncate the last one - center a
+                        // wrap-content Column inside a Box instead so text always gets its full height.
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp)
+                                .graphicsLayer {
+                                    alpha = pageFraction
+                                    val scale = 0.72f + 0.28f * pageFraction
+                                    scaleX = scale
+                                    scaleY = scale
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                // White circular icon bubble, matching the mock's high-contrast badge.
+                                Box(
+                                    modifier = Modifier
+                                        .size(26.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.White),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (slide.useAppLogo) {
+                                        Image(
+                                            painter = painterResource(R.drawable.ic_launcher_foreground),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(23.dp),
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = slide.icon!!,
+                                            contentDescription = null,
+                                            tint = Color(0xFF1A73E8),
+                                            modifier = Modifier.size(14.dp),
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = slide.title,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF1A2733),
+                                    textAlign = TextAlign.Center,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    text = slide.description,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF3A4A59),
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    AnimatedContent(
+                        targetState = isLastPage,
+                        transitionSpec = {
+                            (fadeIn(animationSpec = MotionScheme.expressive().defaultEffectsSpec()) +
+                                scaleIn(initialScale = 0.85f, animationSpec = spatialSpec))
+                                .togetherWith(fadeOut(animationSpec = MotionScheme.expressive().defaultEffectsSpec()))
+                        },
+                        label = "introAction",
+                    ) { showGetStarted ->
+                        if (showGetStarted) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                // White pill CTA with a leading arrow, high-contrast on the photo bg.
+                                Button(
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                                    onClick = onGetStarted,
+                                    shape = CircleShape,
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color.White,
+                                        contentColor = Color(0xFF1A73E8),
+                                    ),
+                                    icon = {
+                                        Icon(
+                                            Icons.AutoMirrored.Outlined.ArrowForward,
+                                            contentDescription = null,
+                                            tint = Color(0xFF1A73E8),
+                                        )
+                                    },
+                                ) {
+                                    Text("Get started")
+                                }
+                                if (onCreate != null) {
+                                    Spacer(Modifier.height(6.dp))
+                                    TextButton(onClick = onCreate) {
+                                        Text(
+                                            "Create a new identity",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color(0xFF1A2733),
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            TextButton(onClick = { scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) } }) {
+                                Text("Next", color = Color(0xFF1A2733), fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                    if (error != null) {
+                        Spacer(Modifier.height(6.dp))
+                        ErrorCard(error, modifier = Modifier.padding(horizontal = 14.dp))
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
+
+                // A bold progress arc hugging the bottom of the bezel tracks progress through the
+                // slides, filling left-to-right - the same "step X of N" pattern Wear OS/Pixel
+                // Watch setup uses. Mirrored horizontally because the indicator always fills
+                // starting at [startAngle], which sits on the right side of the arc otherwise.
+                // Hidden on the last slide, where the "Get started" button takes its place.
+                val arcAlpha by animateFloatAsState(
+                    targetValue = if (isLastPage) 0f else 1f,
+                    animationSpec = MotionScheme.expressive().defaultEffectsSpec(),
+                    label = "arcAlpha",
+                )
+                SegmentedCircularProgressIndicator(
+                    segmentCount = introSlides.size,
+                    progress = { (pagerState.currentPage + 1) / introSlides.size.toFloat() },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = -1f
+                            alpha = arcAlpha
+                        },
+                    startAngle = 25f,
+                    endAngle = 155f,
+                    strokeWidth = 7.dp,
+                    colors = ProgressIndicatorDefaults.colors(
+                        indicatorColor = Color(0xFF1A73E8),
+                        trackColor = Color.White.copy(alpha = 0.6f),
+                    ),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WordEntryScreen(
+    index: Int,
+    initialValue: String,
+    error: String?,
+    onDismissError: () -> Unit,
+    onBack: () -> Unit,
+    onNext: (String) -> Unit,
+) {
+    var input by remember(index) { mutableStateOf(TextFieldValue(initialValue)) }
+    val suggestions = remember(input.text) { Bip39.suggestions(input.text) }
+    val isValid = Bip39.isKnownWord(input.text)
+
+    AppScaffold {
+        ScreenScaffold { contentPadding ->
+            Column(
+                modifier = Modifier
+                    .padding(contentPadding)
+                    .padding(horizontal = 14.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "Word ${index + 1} of ${Bip39.WORD_COUNT}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(8.dp))
+                BasicTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    singleLine = true,
+                    textStyle = TextStyle(
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = MaterialTheme.typography.titleMedium.fontSize,
+                        textAlign = TextAlign.Center,
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape)
+                        .padding(vertical = 12.dp, horizontal = 16.dp),
+                )
+                if (suggestions.isNotEmpty()) {
+                    Spacer(Modifier.height(10.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        items(suggestions) { suggestion ->
+                            FilledTonalButton(onClick = { onNext(suggestion) }) {
+                                Text(suggestion)
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(14.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedIconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                    }
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        onClick = { onNext(input.text) },
+                        enabled = isValid,
+                        icon = if (index == Bip39.WORD_COUNT - 1) {
+                            { Icon(Icons.Outlined.Check, contentDescription = null) }
+                        } else null,
+                    ) {
+                        Text(if (index == Bip39.WORD_COUNT - 1) "Confirm" else "Next")
+                    }
+                }
+                if (error != null) {
+                    Spacer(Modifier.height(10.dp))
+                    ErrorCard(error, onRetry = onDismissError)
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun WordDisplayScreen(
+    index: Int,
+    word: String,
+    isLast: Boolean,
+    onBack: () -> Unit,
+    onNext: () -> Unit,
+) {
+    AppScaffold {
+        ScreenScaffold { contentPadding ->
+            Column(
+                modifier = Modifier
+                    .padding(contentPadding)
+                    .padding(horizontal = 14.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "Word ${index + 1} of ${Bip39.WORD_COUNT}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(10.dp))
+                Card(onClick = {}, modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            text = word,
+                            style = MaterialTheme.typography.titleLarge,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = "Write down this word in order, it won't be shown again.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(14.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedIconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                    }
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        onClick = onNext,
+                        icon = if (isLast) {
+                            { Icon(Icons.Outlined.Check, contentDescription = null) }
+                        } else null,
+                    ) {
+                        Text(if (isLast) "Finish" else "Next")
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun ErrorCard(error: String, onRetry: (() -> Unit)? = null, modifier: Modifier = Modifier) {
+    Card(onClick = onRetry ?: {}, modifier = modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                text = error,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+            )
+            if (onRetry != null) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Tap to retry",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+        }
+    }
+}
