@@ -90,7 +90,6 @@ private fun NanChatApp(repository: ChatRepository) {
             OnboardingScreen(
                 error = error,
                 onImportMnemonic = { words -> repository.loginWithMnemonic(words) },
-                onCreateConfirmed = { seed -> repository.loginWithSeed(seed) },
                 onDismissError = { repository.clearError() },
             )
         }

@@ -95,12 +95,6 @@ object NanoCrypto {
     // on every push notification decrypt (NanChatMessagingService) when it's always the same seed.
     private val accountCache = ConcurrentHashMap<String, NanoAccountKeys>()
 
-    fun generateSeed(): String {
-        val bytes = ByteArray(32)
-        secureRandom.nextBytes(bytes)
-        return bytes.toHex()
-    }
-
     fun isValidSeed(seed: String): Boolean = seed.matches(Regex("^[0-9a-fA-F]{64}$"))
 
     /** Derives account 0 from a legacy (blake2b) seed, matching multi-nano-web's `wallet.generateLegacy`. */

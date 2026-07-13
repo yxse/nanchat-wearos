@@ -13,8 +13,7 @@
 .externalNativeBuild
 .cxx
 local.properties
-NanChat
-nanwallet-backend
+old/
 .claude
 
 # Release signing - never commit

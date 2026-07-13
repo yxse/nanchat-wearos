@@ -47,20 +47,10 @@ object Bip39 {
         return entropyHex
     }
 
-    fun seedToMnemonic(seedHex: String): List<String> {
-        val bits = hexToBits(seedHex) + checksumBits(seedHex)
-        return (0 until WORD_COUNT).map { i ->
-            words[bits.substring(i * 11, i * 11 + 11).toInt(2)]
-        }
-    }
-
     private fun checksumBits(entropyHex: String): String {
         val hash = MessageDigest.getInstance("SHA-256").digest(entropyHex.hexToBytes())
         return (hash[0].toInt() and 0xFF).toString(2).padStart(8, '0')
     }
-
-    private fun hexToBits(hex: String): String =
-        hex.hexToBytes().joinToString("") { b -> (b.toInt() and 0xFF).toString(2).padStart(8, '0') }
 
     private fun bitsToHex(bits: String): String {
         val bytes = ByteArray(bits.length / 8) { i -> bits.substring(i * 8, i * 8 + 8).toInt(2).toByte() }

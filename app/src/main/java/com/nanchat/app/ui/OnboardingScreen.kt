@@ -73,16 +73,12 @@ import androidx.wear.compose.material3.SegmentedCircularProgressIndicator
 import androidx.wear.compose.material3.Text
 import androidx.wear.compose.material3.TextButton
 import com.nanchat.app.crypto.Bip39
-import com.nanchat.app.crypto.NanoCrypto
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
-
-private const val CREATE_WALLET_ENABLED = false
 
 private sealed interface Step {
     data object Intro : Step
     data class Import(val words: List<String>, val index: Int) : Step
-    data class Create(val seed: String, val words: List<String>, val index: Int) : Step
 }
 
 private data class IntroSlide(
@@ -121,7 +117,6 @@ private val introSlides = listOf(
 fun OnboardingScreen(
     error: String?,
     onImportMnemonic: (List<String>) -> Unit,
-    onCreateConfirmed: (String) -> Unit,
     onDismissError: () -> Unit,
 ) {
     var step by remember { mutableStateOf<Step>(Step.Intro) }
@@ -129,12 +124,6 @@ fun OnboardingScreen(
     when (val s = step) {
         is Step.Intro -> IntroScreen(
             onGetStarted = { step = Step.Import(List(Bip39.WORD_COUNT) { "" }, 0) },
-            onCreate = if (CREATE_WALLET_ENABLED) {
-                {
-                    val seed = NanoCrypto.generateSeed()
-                    step = Step.Create(seed, Bip39.seedToMnemonic(seed), 0)
-                }
-            } else null,
             error = error,
         )
         is Step.Import -> WordEntryScreen(
@@ -156,34 +145,17 @@ fun OnboardingScreen(
                 }
             },
         )
-        is Step.Create -> WordDisplayScreen(
-            index = s.index,
-            word = s.words[s.index],
-            onBack = {
-                if (s.index == 0) step = Step.Intro
-                else step = s.copy(index = s.index - 1)
-            },
-            onNext = {
-                if (s.index == Bip39.WORD_COUNT - 1) {
-                    onCreateConfirmed(s.seed)
-                } else {
-                    step = s.copy(index = s.index + 1)
-                }
-            },
-            isLast = s.index == Bip39.WORD_COUNT - 1,
-        )
     }
 }
 
 /** First-launch presentation carousel - swipe through what NanChat is, then go straight into the
- * seed import flow (no separate "Import" choice screen). Wallet creation stays reachable only if
- * [CREATE_WALLET_ENABLED] is flipped on, as a secondary action on the last slide.
+ * seed import flow (no separate "Import" choice screen).
  *
  * Visual style follows the Pixel Watch "Google style" setup pattern: a full-bleed photo
  * background per slide, a white icon bubble, bold title, a subtle bottom progress arc, and a
  * pill-shaped white CTA button on the final slide. */
 @Composable
-private fun IntroScreen(onGetStarted: () -> Unit, onCreate: (() -> Unit)?, error: String?) {
+private fun IntroScreen(onGetStarted: () -> Unit, error: String?) {
     val pagerState = rememberPagerState(pageCount = { introSlides.size })
     val scope = rememberCoroutineScope()
     val isLastPage = pagerState.currentPage == introSlides.lastIndex
@@ -294,36 +266,24 @@ private fun IntroScreen(onGetStarted: () -> Unit, onCreate: (() -> Unit)?, error
                         label = "introAction",
                     ) { showGetStarted ->
                         if (showGetStarted) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                // White pill CTA with a leading arrow, high-contrast on the photo bg.
-                                Button(
-                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                                    onClick = onGetStarted,
-                                    shape = CircleShape,
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color.White,
-                                        contentColor = Color(0xFF1A73E8),
-                                    ),
-                                    icon = {
-                                        Icon(
-                                            Icons.AutoMirrored.Outlined.ArrowForward,
-                                            contentDescription = null,
-                                            tint = Color(0xFF1A73E8),
-                                        )
-                                    },
-                                ) {
-                                    Text("Get started")
-                                }
-                                if (onCreate != null) {
-                                    Spacer(Modifier.height(6.dp))
-                                    TextButton(onClick = onCreate) {
-                                        Text(
-                                            "Create a new identity",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = Color(0xFF1A2733),
-                                        )
-                                    }
-                                }
+                            // White pill CTA with a leading arrow, high-contrast on the photo bg.
+                            Button(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                                onClick = onGetStarted,
+                                shape = CircleShape,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color.White,
+                                    contentColor = Color(0xFF1A73E8),
+                                ),
+                                icon = {
+                                    Icon(
+                                        Icons.AutoMirrored.Outlined.ArrowForward,
+                                        contentDescription = null,
+                                        tint = Color(0xFF1A73E8),
+                                    )
+                                },
+                            ) {
+                                Text("Get started")
                             }
                         } else {
                             TextButton(onClick = { scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) } }) {
@@ -448,75 +408,6 @@ private fun WordEntryScreen(
                 if (error != null) {
                     Spacer(Modifier.height(10.dp))
                     ErrorCard(error, onRetry = onDismissError)
-                }
-                Spacer(Modifier.height(8.dp))
-            }
-        }
-    }
-}
-
-@Composable
-private fun WordDisplayScreen(
-    index: Int,
-    word: String,
-    isLast: Boolean,
-    onBack: () -> Unit,
-    onNext: () -> Unit,
-) {
-    AppScaffold {
-        ScreenScaffold { contentPadding ->
-            Column(
-                modifier = Modifier
-                    .padding(contentPadding)
-                    .padding(horizontal = 14.dp)
-                    .verticalScroll(rememberScrollState()),
-            ) {
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = "Word ${index + 1} of ${Bip39.WORD_COUNT}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(10.dp))
-                Card(onClick = {}, modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text(
-                            text = word,
-                            style = MaterialTheme.typography.titleLarge,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
-                }
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    text = "Write down this word in order, it won't be shown again.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center,
-                )
-                Spacer(Modifier.height(14.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    OutlinedIconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
-                    }
-                    Button(
-                        modifier = Modifier.weight(1f),
-                        onClick = onNext,
-                        icon = if (isLast) {
-                            { Icon(Icons.Outlined.Check, contentDescription = null) }
-                        } else null,
-                    ) {
-                        Text(if (isLast) "Finish" else "Next")
-                    }
                 }
                 Spacer(Modifier.height(8.dp))
             }

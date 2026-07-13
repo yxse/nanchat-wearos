@@ -142,7 +142,7 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
         }
     }
 
-    fun loginWithSeed(seed: String): Boolean {
+    private fun loginWithSeed(seed: String): Boolean {
         if (!NanoCrypto.isValidSeed(seed)) {
             _error.value = "Invalid seed (expected 64 hex characters)"
             return false
@@ -161,19 +161,6 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
             return false
         }
         return loginWithSeed(seed)
-    }
-
-    fun logout() {
-        socket.disconnect()
-        socketStatus = SocketStatus.DISCONNECTED
-        secureStore.clear()
-        _session.value = Session.LoggedOut
-        _chats.value = emptyList()
-        _messages.value = emptyList()
-        decryptedMessageCache.clear()
-        chatHasMoreOlder.clear()
-        chatLoadingOlder.clear()
-        openChatId = null
     }
 
     fun clearError() {
