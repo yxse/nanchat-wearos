@@ -13,7 +13,6 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -30,7 +29,6 @@ import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.foundation.rotary.rotaryScrollable
 import androidx.wear.compose.material3.AppScaffold
-import androidx.wear.compose.material3.CircularProgressIndicator
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.ScreenScaffold
 import androidx.wear.compose.material3.Text
@@ -83,7 +81,10 @@ fun StickerPickerScreen(
                         modifier = Modifier.align(Alignment.Center),
                     )
                 } else if (!gridShown) {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                    ExpressiveLoadingIndicator(
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.align(Alignment.Center),
+                    )
                 } else {
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(3),
@@ -107,7 +108,7 @@ fun StickerPickerScreen(
                                 contentScale = ContentScale.Fit,
                                 modifier = Modifier
                                     .aspectRatio(1f)
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(MaterialTheme.shapes.small)
                                     .clickable { onStickerSelected(sticker.url) },
                             )
                         }

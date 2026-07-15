@@ -12,6 +12,7 @@ import com.nanchat.app.network.ChatSocket
 import com.nanchat.app.notifications.AppForeground
 import com.nanchat.app.notifications.NotificationHelper
 import com.google.firebase.messaging.FirebaseMessaging
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -126,6 +127,8 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
                 try {
                     withContext(Dispatchers.IO) { api.registerPushToken(token, address) }
                     Log.d(TAG, "registerPushToken: registered (attempt $attempt)")
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     Log.e(TAG, "registerPushToken failed (attempt $attempt): ${e.message}", e)
                     retryRegisterPushToken(address, attempt)
@@ -196,6 +199,8 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
                     // budget is exhausted. This point proves the network is actually up.
                     registerPushToken(address)
                     break
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     attempt++
                     Log.e(TAG, "connectAndLoad failed (attempt $attempt): ${e.message}", e)
@@ -256,6 +261,8 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
                         .sortedByDescending { it.lastMessageTimestamp.orEmpty() }
                 }
                 enrichMissingProfiles()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "loadChats failed", e)
                 _error.value = e.message ?: "Could not load chats"
@@ -275,6 +282,8 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
             for (chat in toResolve) {
                 val profile = try {
                     withContext(Dispatchers.IO) { api.fetchAccountProfile(chat.otherAccount) }
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     null to null
                 }
@@ -333,6 +342,8 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
                 if (openChatId == chat.id) {
                     _messages.value = chatCache.values.sortedBy { it.height }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 if (chatCache.isEmpty()) _error.value = e.message ?: "Could not load messages"
             } finally {
@@ -377,6 +388,8 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
                 if (openChatId == chat.id) {
                     _messages.value = chatCache.values.sortedBy { it.height }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "loadOlderMessages failed", e)
             } finally {
@@ -529,6 +542,8 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
                 // Warm the sticker cache eagerly (metadata + images) so the picker opens instantly
                 // and fully offline, instead of loading each pack on first visit.
                 collections.forEach { col -> loadStickers(col.id) {} }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "loadStickerCollections failed", e)
             }
@@ -543,6 +558,8 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
                 stickersByCollection[collectionId] = stickers
                 onResult(stickers)
                 prefetchStickerImages(stickers)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "loadStickers failed", e)
                 onResult(emptyList())
@@ -561,6 +578,8 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
         scope.launch {
             try {
                 onResult(withContext(Dispatchers.IO) { api.searchStickers(query) })
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "searchStickers failed", e)
                 onResult(emptyList())
@@ -610,6 +629,8 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
                 )
                 _chats.value = listOf(chat) + _chats.value
                 onResult(chat)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _error.value = e.message ?: "Could not start chat"
                 onResult(null)

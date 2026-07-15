@@ -148,11 +148,13 @@ private fun TransformingLazyColumnItemScope.ChatRow(
                 )
             }
             if (chat.unreadCount > 0) {
+                // Tertiary (not primary) per the Wear color guide: a badge that should draw attention
+                // without competing with primary actions like the "Start chat" button.
                 Box(
                     modifier = Modifier
                         .size(10.dp)
                         .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary),
+                        .background(MaterialTheme.colorScheme.tertiary),
                 )
             }
         }

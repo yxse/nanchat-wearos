@@ -60,7 +60,6 @@ import androidx.compose.ui.unit.dp
 import com.nanchat.app.R
 import androidx.wear.compose.material3.AppScaffold
 import androidx.wear.compose.material3.Button
-import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.Card
 import androidx.wear.compose.material3.FilledTonalButton
 import androidx.wear.compose.material3.Icon
@@ -85,8 +84,6 @@ private data class IntroSlide(
     val icon: ImageVector?,
     val title: String,
     val description: String,
-    // Flat pastel background per slide, matching the Pixel Watch setup look (no gradient/gloss).
-    val backgroundColor: Color,
     // Only the first slide uses the real app logo instead of a generic Material icon.
     val useAppLogo: Boolean = false,
 )
@@ -96,22 +93,28 @@ private val introSlides = listOf(
         icon = null,
         title = "NanChat",
         description = "Fast & private messaging",
-        backgroundColor = Color(0xFFBFD9EE),
         useAppLogo = true,
     ),
     IntroSlide(
         icon = Icons.Outlined.Lock,
         title = "Encrypted",
         description = "Only you can read your chats",
-        backgroundColor = Color(0xFFA9CBEE),
     ),
     IntroSlide(
         icon = Icons.Outlined.Bolt,
         title = "Your identity",
         description = "No accounts - just your key",
-        backgroundColor = Color(0xFFC4C0EE),
     ),
 )
+
+/** Flat dark background per slide (Wear OS is dark-theme-only, built on a black background - see
+ * the color style guide) instead of the light pastel look a phone-style setup carousel would use. */
+@Composable
+private fun slideBackgroundColor(index: Int): Color = when (index) {
+    0 -> MaterialTheme.colorScheme.surfaceContainerLow
+    1 -> MaterialTheme.colorScheme.surfaceContainer
+    else -> MaterialTheme.colorScheme.primaryContainer
+}
 
 @Composable
 fun OnboardingScreen(
@@ -168,12 +171,12 @@ private fun IntroScreen(onGetStarted: () -> Unit, error: String?) {
     AppScaffold {
         ScreenScaffold { contentPadding ->
             Box(modifier = Modifier.fillMaxSize()) {
-                // Full-bleed flat pastel background per slide, crossfading as you swipe.
+                // Full-bleed flat dark background per slide, crossfading as you swipe.
                 HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(introSlides[page].backgroundColor),
+                            .background(slideBackgroundColor(page)),
                     )
                 }
 
@@ -210,12 +213,19 @@ private fun IntroScreen(onGetStarted: () -> Unit, error: String?) {
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
-                                // White circular icon bubble, matching the mock's high-contrast badge.
+                                // Icon bubble. The app-logo slide keeps a white badge (the logo art
+                                // bakes in its own brand-blue shape and reads correctly on white);
+                                // the generic Material icon slides use a tonal container instead,
+                                // matching the surfaceContainerHigh circles used elsewhere (e.g.
+                                // ChatAvatar).
                                 Box(
                                     modifier = Modifier
                                         .size(26.dp)
                                         .clip(CircleShape)
-                                        .background(Color.White),
+                                        .background(
+                                            if (slide.useAppLogo) Color.White
+                                            else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        ),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     if (slide.useAppLogo) {
@@ -228,7 +238,7 @@ private fun IntroScreen(onGetStarted: () -> Unit, error: String?) {
                                         Icon(
                                             imageVector = slide.icon!!,
                                             contentDescription = null,
-                                            tint = Color(0xFF1A73E8),
+                                            tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(14.dp),
                                         )
                                     }
@@ -238,7 +248,7 @@ private fun IntroScreen(onGetStarted: () -> Unit, error: String?) {
                                     text = slide.title,
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF1A2733),
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     textAlign = TextAlign.Center,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -248,7 +258,7 @@ private fun IntroScreen(onGetStarted: () -> Unit, error: String?) {
                                 Text(
                                     text = slide.description,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFF3A4A59),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     textAlign = TextAlign.Center,
                                     modifier = Modifier.fillMaxWidth(),
                                 )
@@ -266,20 +276,16 @@ private fun IntroScreen(onGetStarted: () -> Unit, error: String?) {
                         label = "introAction",
                     ) { showGetStarted ->
                         if (showGetStarted) {
-                            // White pill CTA with a leading arrow, high-contrast on the photo bg.
+                            // Pill CTA with a leading arrow, using the theme's primary/on-primary
+                            // pairing (Button's own defaults) for high contrast on the dark slide bg.
                             Button(
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                                 onClick = onGetStarted,
                                 shape = CircleShape,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color.White,
-                                    contentColor = Color(0xFF1A73E8),
-                                ),
                                 icon = {
                                     Icon(
                                         Icons.AutoMirrored.Outlined.ArrowForward,
                                         contentDescription = null,
-                                        tint = Color(0xFF1A73E8),
                                     )
                                 },
                             ) {
@@ -287,7 +293,7 @@ private fun IntroScreen(onGetStarted: () -> Unit, error: String?) {
                             }
                         } else {
                             TextButton(onClick = { scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) } }) {
-                                Text("Next", color = Color(0xFF1A2733), fontWeight = FontWeight.SemiBold)
+                                Text("Next", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -321,8 +327,8 @@ private fun IntroScreen(onGetStarted: () -> Unit, error: String?) {
                     endAngle = 155f,
                     strokeWidth = 7.dp,
                     colors = ProgressIndicatorDefaults.colors(
-                        indicatorColor = Color(0xFF1A73E8),
-                        trackColor = Color.White.copy(alpha = 0.6f),
+                        indicatorColor = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
                     ),
                 )
             }

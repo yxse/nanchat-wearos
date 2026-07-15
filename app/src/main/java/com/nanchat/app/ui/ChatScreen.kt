@@ -339,7 +339,7 @@ private fun MessageBubble(message: Message, isMine: Boolean) {
                     .widthIn(max = 220.dp)
                     .background(
                         if (isMine) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
-                        RoundedCornerShape(20.dp),
+                        MaterialTheme.shapes.medium,
                     )
                     .padding(horizontal = 14.dp, vertical = 10.dp),
             ) {
@@ -415,7 +415,7 @@ private fun MessageComposeBar(
                         onDismissEmpty()
                     }
                 }
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(20.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.shapes.medium)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
         )
         Spacer(Modifier.width(6.dp))

@@ -78,9 +78,13 @@ private fun NanChatApp(repository: ChatRepository) {
 
     var nav by remember { mutableStateOf<NavScreen>(NavScreen.ChatList) }
 
+    // Requested once the user is actually logged in - not unconditionally at cold start - since
+    // notifications only become relevant once there's an account that can receive messages (Wear
+    // guide: request permissions only when it's contextually clear why they're needed).
     val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
-    LaunchedEffect(Unit) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+    val isLoggedIn = session is Session.LoggedIn
+    LaunchedEffect(isLoggedIn) {
+        if (isLoggedIn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
