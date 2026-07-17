@@ -28,6 +28,8 @@ import com.nanchat.app.data.ChatRepository
 import com.nanchat.app.data.Session
 import com.nanchat.app.notifications.AppForeground
 import com.nanchat.app.presentation.theme.NanChatTheme
+import com.nanchat.app.ui.BlockedHiddenScreen
+import com.nanchat.app.ui.ChatActionMenu
 import com.nanchat.app.ui.ChatListScreen
 import com.nanchat.app.ui.ChatScreen
 import com.nanchat.app.ui.NewChatScreen
@@ -38,7 +40,9 @@ private sealed interface NavScreen {
     data object ChatList : NavScreen
     data object NewChat : NavScreen
     data object ShowSeed : NavScreen
+    data object BlockedAndHidden : NavScreen
     data class ChatDetail(val chat: Chat) : NavScreen
+    data class ChatMenu(val chat: Chat) : NavScreen
 }
 
 class MainActivity : ComponentActivity() {
@@ -78,6 +82,9 @@ private fun NanChatApp(repository: ChatRepository) {
     val error by repository.error.collectAsState()
     val hiddenGroupCount by repository.hiddenGroupCount.collectAsState()
     val stickerCollections by repository.stickerCollections.collectAsState()
+    val hiddenChats by repository.hiddenChats.collectAsState()
+    val blockedAccounts by repository.blockedAccounts.collectAsState()
+    val ownProfile by repository.ownProfile.collectAsState()
 
     var nav by remember { mutableStateOf<NavScreen>(NavScreen.ChatList) }
     val context = LocalContext.current
@@ -114,13 +121,19 @@ private fun NanChatApp(repository: ChatRepository) {
                         error = error,
                         hiddenGroupCount = hiddenGroupCount,
                         appVersion = appVersion,
+                        ownProfile = ownProfile,
                         onOpenChat = { chat ->
                             repository.openChat(chat)
                             nav = NavScreen.ChatDetail(chat)
                         },
                         onNewChat = { nav = NavScreen.NewChat },
                         onRetry = { repository.refreshChats() },
+                        onLongPressChat = { chat -> nav = NavScreen.ChatMenu(chat) },
                         onShowSeed = { nav = NavScreen.ShowSeed },
+                        onShowBlockedAndHidden = {
+                            repository.loadBlockedAccounts()
+                            nav = NavScreen.BlockedAndHidden
+                        },
                         onLogout = {
                             nav = NavScreen.ChatList
                             repository.logout()
@@ -134,6 +147,45 @@ private fun NanChatApp(repository: ChatRepository) {
                             Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
                         } else {
                             SeedScreen(mnemonic = repository.currentMnemonic().orEmpty())
+                        }
+                    }
+                }
+                is NavScreen.ChatMenu -> {
+                    BackHandler { nav = NavScreen.ChatList }
+                    SwipeToDismissBox(onDismissed = { nav = NavScreen.ChatList }) { isBackground ->
+                        if (isBackground) {
+                            Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
+                        } else {
+                            ChatActionMenu(
+                                chat = screen.chat,
+                                onToggleMute = {
+                                    repository.setChatMuted(screen.chat, !screen.chat.muted)
+                                    nav = NavScreen.ChatList
+                                },
+                                onHide = {
+                                    repository.hideChat(screen.chat.id)
+                                    nav = NavScreen.ChatList
+                                },
+                                onBlock = {
+                                    repository.blockChat(screen.chat)
+                                    nav = NavScreen.ChatList
+                                },
+                            )
+                        }
+                    }
+                }
+                is NavScreen.BlockedAndHidden -> {
+                    BackHandler { nav = NavScreen.ChatList }
+                    SwipeToDismissBox(onDismissed = { nav = NavScreen.ChatList }) { isBackground ->
+                        if (isBackground) {
+                            Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
+                        } else {
+                            BlockedHiddenScreen(
+                                blockedAccounts = blockedAccounts,
+                                hiddenChats = hiddenChats,
+                                onUnblock = { address -> repository.unblockAccount(address) },
+                                onUnhide = { chatId -> repository.unhideChat(chatId) },
+                            )
                         }
                     }
                 }

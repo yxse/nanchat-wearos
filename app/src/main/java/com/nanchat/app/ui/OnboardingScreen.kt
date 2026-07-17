@@ -9,6 +9,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,6 +47,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
@@ -58,6 +61,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.nanchat.app.R
+import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
+import androidx.wear.compose.foundation.rotary.rotaryScrollable
 import androidx.wear.compose.material3.AppScaffold
 import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.Card
@@ -386,13 +391,21 @@ private fun WordEntryScreen(
     val isValid = Bip39.isKnownWord(input.text)
 
     val scrollState = rememberScrollState()
+    val rotaryFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { rotaryFocusRequester.requestFocus() }
     AppScaffold {
         ScreenScaffold(scrollState = scrollState) { contentPadding ->
             Column(
                 modifier = Modifier
                     .padding(contentPadding)
                     .padding(horizontal = 14.dp)
-                    .verticalScroll(scrollState),
+                    .verticalScroll(scrollState)
+                    .rotaryScrollable(
+                        behavior = RotaryScrollableDefaults.behavior(scrollableState = scrollState),
+                        focusRequester = rotaryFocusRequester,
+                    )
+                    .focusRequester(rotaryFocusRequester)
+                    .focusable(),
             ) {
                 Spacer(Modifier.height(6.dp))
                 Text(
@@ -465,13 +478,21 @@ private fun WordEntryScreen(
 private fun BackupSeedScreen(mnemonic: List<String>, onBack: () -> Unit, onNext: () -> Unit) {
     var revealed by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
+    val rotaryFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { rotaryFocusRequester.requestFocus() }
     AppScaffold {
         ScreenScaffold(scrollState = scrollState) { contentPadding ->
             Column(
                 modifier = Modifier
                     .padding(contentPadding)
                     .padding(horizontal = 14.dp)
-                    .verticalScroll(scrollState),
+                    .verticalScroll(scrollState)
+                    .rotaryScrollable(
+                        behavior = RotaryScrollableDefaults.behavior(scrollableState = scrollState),
+                        focusRequester = rotaryFocusRequester,
+                    )
+                    .focusRequester(rotaryFocusRequester)
+                    .focusable(),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Spacer(Modifier.height(4.dp))
@@ -556,6 +577,8 @@ private fun CreateNameScreen(
     var input by remember { mutableStateOf(TextFieldValue("")) }
     val isValid = input.text.trim().isNotEmpty() && input.text.trim().length <= 24
     val scrollState = rememberScrollState()
+    val rotaryFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { rotaryFocusRequester.requestFocus() }
 
     AppScaffold {
         ScreenScaffold(scrollState = scrollState) { contentPadding ->
@@ -563,7 +586,13 @@ private fun CreateNameScreen(
                 modifier = Modifier
                     .padding(contentPadding)
                     .padding(horizontal = 14.dp)
-                    .verticalScroll(scrollState),
+                    .verticalScroll(scrollState)
+                    .rotaryScrollable(
+                        behavior = RotaryScrollableDefaults.behavior(scrollableState = scrollState),
+                        focusRequester = rotaryFocusRequester,
+                    )
+                    .focusRequester(rotaryFocusRequester)
+                    .focusable(),
             ) {
                 Spacer(Modifier.height(6.dp))
                 Text(

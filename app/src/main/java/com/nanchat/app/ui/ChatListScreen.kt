@@ -19,6 +19,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.automirrored.outlined.Logout
+import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.NotificationsOff
+import androidx.compose.material.icons.outlined.PeopleOutline
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.outlined.VpnKey
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -48,6 +52,7 @@ import androidx.wear.compose.foundation.rotary.rotaryScrollable
 import androidx.wear.compose.material3.AppScaffold
 import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.Card
+import androidx.wear.compose.material3.FilledTonalButton
 import androidx.wear.compose.material3.HorizontalPageIndicator
 import androidx.wear.compose.material3.Icon
 import androidx.wear.compose.material3.MaterialTheme
@@ -60,6 +65,7 @@ import androidx.wear.compose.material3.lazy.rememberTransformationSpec
 import androidx.wear.compose.material3.lazy.transformedHeight
 import coil.compose.AsyncImage
 import com.nanchat.app.data.Chat
+import com.nanchat.app.network.OwnProfile
 import com.nanchat.app.ui.util.shortAddress
 
 /** The chat list is page 0 of a 2-page pager; swiping right reveals Settings (page 1) - show
@@ -71,10 +77,13 @@ fun ChatListScreen(
     error: String?,
     hiddenGroupCount: Int,
     appVersion: String,
+    ownProfile: OwnProfile?,
     onOpenChat: (Chat) -> Unit,
     onNewChat: () -> Unit,
     onRetry: () -> Unit,
+    onLongPressChat: (Chat) -> Unit,
     onShowSeed: () -> Unit,
+    onShowBlockedAndHidden: () -> Unit,
     onLogout: () -> Unit,
 ) {
     val pagerState = rememberPagerState(pageCount = { 2 })
@@ -90,9 +99,17 @@ fun ChatListScreen(
                         onOpenChat = onOpenChat,
                         onNewChat = onNewChat,
                         onRetry = onRetry,
+                        onLongPressChat = onLongPressChat,
                     )
                 } else {
-                    SettingsPage(appVersion = appVersion, onShowSeed = onShowSeed, onLogout = onLogout)
+                    SettingsPage(
+                        appVersion = appVersion,
+                        ownProfile = ownProfile,
+                        isActive = pagerState.currentPage == page,
+                        onShowSeed = onShowSeed,
+                        onShowBlockedAndHidden = onShowBlockedAndHidden,
+                        onLogout = onLogout,
+                    )
                 }
             }
             // Native Wear page dots (same component the system uses, e.g. the media control app) -
@@ -111,6 +128,7 @@ private fun ChatListPage(
     onOpenChat: (Chat) -> Unit,
     onNewChat: () -> Unit,
     onRetry: () -> Unit,
+    onLongPressChat: (Chat) -> Unit,
 ) {
     val state = rememberTransformingLazyColumnState()
     val transformationSpec = rememberTransformationSpec()
@@ -172,7 +190,12 @@ private fun ChatListPage(
                     }
                 } else {
                     items(chats, key = { it.id }) { chat ->
-                        ChatRow(chat = chat, transformationSpec = transformationSpec, onClick = { onOpenChat(chat) })
+                        ChatRow(
+                            chat = chat,
+                            transformationSpec = transformationSpec,
+                            onClick = { onOpenChat(chat) },
+                            onLongClick = { onLongPressChat(chat) },
+                        )
                     }
                 }
             }
@@ -180,14 +203,95 @@ private fun ChatListPage(
     }
 }
 
+/** Full-screen action menu for a long-pressed chat - mute/unmute, hide (local to this device, see
+ * [com.nanchat.app.data.ChatRepository.hideChat]), or block (removes the chat and stops the other
+ * person messaging again). Its own screen (reached via [com.nanchat.app.presentation.MainActivity]'s
+ * nav, dismissed by swipe/back like every other sub-screen) rather than an overlay, so it gets the
+ * same scrollable-with-rotary + native scroll indicator + top-safe-area handling as the rest of the
+ * app instead of reinventing it. */
 @Composable
-private fun SettingsPage(appVersion: String, onShowSeed: () -> Unit, onLogout: () -> Unit) {
+fun ChatActionMenu(
+    chat: Chat,
+    onToggleMute: () -> Unit,
+    onHide: () -> Unit,
+    onBlock: () -> Unit,
+) {
+    val scrollState = rememberScrollState()
+    val rotaryFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { rotaryFocusRequester.requestFocus() }
+
+    AppScaffold {
+        ScreenScaffold(scrollState = scrollState) { contentPadding ->
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(contentPadding)
+                    .padding(horizontal = 20.dp)
+                    .verticalScroll(scrollState)
+                    .rotaryScrollable(
+                        behavior = RotaryScrollableDefaults.behavior(scrollableState = scrollState),
+                        focusRequester = rotaryFocusRequester,
+                    )
+                    .focusRequester(rotaryFocusRequester)
+                    .focusable(),
+            ) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = chat.otherName?.takeIf { it.isNotBlank() } ?: shortAddress(chat.otherAccount),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(10.dp))
+                FilledTonalButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onToggleMute,
+                    icon = { Icon(Icons.Outlined.NotificationsOff, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                ) {
+                    Text(if (chat.muted) "Unmute" else "Mute", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.height(6.dp))
+                FilledTonalButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onHide,
+                    icon = { Icon(Icons.Outlined.VisibilityOff, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                ) {
+                    Text("Hide", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.height(6.dp))
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = onBlock,
+                    icon = { Icon(Icons.Outlined.Block, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                ) {
+                    Text("Block", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsPage(
+    appVersion: String,
+    ownProfile: OwnProfile?,
+    isActive: Boolean,
+    onShowSeed: () -> Unit,
+    onShowBlockedAndHidden: () -> Unit,
+    onLogout: () -> Unit,
+) {
     var confirmingLogout by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
     // verticalScroll (unlike TransformingLazyColumn on the chat list) has no built-in rotary
-    // (crown/bezel) support - it only delivers scroll events to a focused element.
+    // (crown/bezel) support - it only delivers scroll events to a focused element. Both pager pages
+    // are composed up front, so requesting focus once at first composition (LaunchedEffect(Unit))
+    // fires before this page is ever the visible one and loses to the chat list page's own focus -
+    // request it every time this page actually becomes the selected one instead.
     val rotaryFocusRequester = remember { FocusRequester() }
-    LaunchedEffect(Unit) { rotaryFocusRequester.requestFocus() }
+    LaunchedEffect(isActive) { if (isActive) rotaryFocusRequester.requestFocus() }
     ScreenScaffold(scrollState = scrollState) { contentPadding ->
         Column(
             modifier = Modifier
@@ -209,13 +313,25 @@ private fun SettingsPage(appVersion: String, onShowSeed: () -> Unit, onLogout: (
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.Bold,
             )
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(10.dp))
+            if (ownProfile != null) {
+                OwnProfileCard(ownProfile)
+                Spacer(Modifier.height(14.dp))
+            }
             Button(
                 modifier = Modifier.fillMaxWidth(),
                 onClick = onShowSeed,
                 icon = { Icon(Icons.Outlined.VpnKey, contentDescription = null, modifier = Modifier.size(16.dp)) },
             ) {
                 Text("Recovery", style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Spacer(Modifier.height(8.dp))
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onShowBlockedAndHidden,
+                icon = { Icon(Icons.Outlined.PeopleOutline, contentDescription = null, modifier = Modifier.size(16.dp)) },
+            ) {
+                Text("Blocked", style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Spacer(Modifier.height(8.dp))
             Button(
@@ -254,14 +370,64 @@ private fun SettingsPage(appVersion: String, onShowSeed: () -> Unit, onLogout: (
     }
 }
 
+/** The signed-in account's own name + NanChat ID (see [OwnProfile]/`/account`'s `username` field,
+ * MyAccount.tsx's "NanChat ID" on the phone app) with avatar, at the top of Settings. */
+@Composable
+private fun OwnProfileCard(profile: OwnProfile) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        if (profile.avatarUrl != null) {
+            AsyncImage(
+                model = profile.avatarUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.size(36.dp).clip(CircleShape),
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = (profile.name?.takeIf { it.isNotBlank() } ?: "?").take(1).uppercase(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = profile.name?.takeIf { it.isNotBlank() } ?: "NanChat user",
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (profile.username != null) {
+                Text(
+                    text = "@${profile.username}",
+                    style = MaterialTheme.typography.bodyExtraSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun TransformingLazyColumnItemScope.ChatRow(
     chat: Chat,
     transformationSpec: TransformationSpec,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
 ) {
     Card(
         onClick = onClick,
+        onLongClick = onLongClick,
         modifier = Modifier.fillMaxWidth().transformedHeight(this, transformationSpec),
         transformation = SurfaceTransformation(transformationSpec),
     ) {
@@ -269,11 +435,23 @@ private fun TransformingLazyColumnItemScope.ChatRow(
             ChatAvatar(chat)
             Spacer(Modifier.width(8.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = chat.otherName?.takeIf { it.isNotBlank() } ?: shortAddress(chat.otherAccount),
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = chat.otherName?.takeIf { it.isNotBlank() } ?: shortAddress(chat.otherAccount),
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (chat.muted) {
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            Icons.Outlined.NotificationsOff,
+                            contentDescription = "Muted",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(12.dp),
+                        )
+                    }
+                }
                 Text(
                     text = chat.lastMessagePreview ?: "New chat",
                     style = MaterialTheme.typography.bodySmall,

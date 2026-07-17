@@ -1,5 +1,6 @@
 package com.nanchat.app.network
 
+import com.nanchat.app.data.BlockedAccount
 import com.nanchat.app.data.Chat
 import com.nanchat.app.data.Message
 import com.nanchat.app.data.Sticker
@@ -17,6 +18,8 @@ class ApiException(message: String) : Exception(message)
 data class ChatsResult(val privateChats: List<Chat>, val hiddenGroupCount: Int)
 
 data class AccountLookupResult(val address: String, val name: String?, val avatarUrl: String?)
+
+data class OwnProfile(val name: String?, val username: String?, val avatarUrl: String?)
 
 private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
@@ -166,6 +169,19 @@ class ChatApi(private val baseUrl: String = "https://api.nanchat.com") {
         return json.optStringOrNull("name") to avatarUrl(json.optJSONObject("profilePicture")?.optStringOrNull("url"))
     }
 
+    /** The signed-in account's own name/NanChat ID/avatar, for display in Settings - `/account` also
+     * returns `username` (the phone app's "NanChat ID", see MyAccount.tsx), which
+     * [fetchAccountProfile] doesn't need for other-participant lookups and so doesn't parse. */
+    fun fetchOwnProfile(address: String): OwnProfile {
+        val request = Request.Builder().url("$baseUrl/account?account=$address").build()
+        val json = executeJsonObject(request)
+        return OwnProfile(
+            name = json.optStringOrNull("name"),
+            username = json.optStringOrNull("username"),
+            avatarUrl = avatarUrl(json.optJSONObject("profilePicture")?.optStringOrNull("url")),
+        )
+    }
+
     /**
      * Resolves a `username` to the account that owns it, or null if no account has that exact
      * username. There's no exact-match/404 endpoint for this server-side (see `/accounts` in
@@ -222,7 +238,63 @@ class ChatApi(private val baseUrl: String = "https://api.nanchat.com") {
             height = obj.optLong("height", -1),
             otherName = otherParticipant?.optStringOrNull("name"),
             otherAvatarUrl = avatarUrl(otherParticipant?.optJSONObject("profilePicture")?.optStringOrNull("url")),
+            muted = obj.optBoolean("muted", false),
         )
+    }
+
+    /** Mutes/unmutes a chat (`/mute`, `/unmute`) - the chat stays in `/chats`, just without
+     * notifications; unlike [blockChat] this doesn't remove it from the list. */
+    fun setChatMuted(token: String, chatId: String, muted: Boolean) {
+        val body = JSONObject().put("chatId", chatId).toString().toRequestBody(JSON_MEDIA_TYPE)
+        val request = Request.Builder()
+            .url("$baseUrl/${if (muted) "mute" else "unmute"}")
+            .header("token", token)
+            .post(body)
+            .build()
+        val json = executeJsonObject(request)
+        if (json.has("error")) throw ApiException(json.getString("error"))
+    }
+
+    /**
+     * Blocks/unblocks an account (`/block-chat`, `/unblock-chat`) - pass the other participant's
+     * address (not the chat id): the server both removes the chat from `/chats` going forward *and*
+     * adds the address to the account's own block list (so a re-created chat stays blocked too).
+     */
+    fun setAccountBlocked(token: String, address: String, blocked: Boolean) {
+        val body = JSONObject().put("chatId", address).toString().toRequestBody(JSON_MEDIA_TYPE)
+        val request = Request.Builder()
+            .url("$baseUrl/${if (blocked) "block-chat" else "unblock-chat"}")
+            .header("token", token)
+            .post(body)
+            .build()
+        val json = executeJsonObject(request)
+        if (json.has("error")) throw ApiException(json.getString("error"))
+    }
+
+    /**
+     * The accounts the signed-in user has blocked (`/blocked-chats`) - a mix of real chats (blocked
+     * after chatting) and bare addresses (blocked before any chat existed), so this reads whichever
+     * of `_id` (a populated chat participant) or `account` (a synthetic blocklist-only entry) is
+     * present rather than assuming one shape.
+     */
+    fun fetchBlockedAccounts(token: String, myAddress: String): List<BlockedAccount> {
+        val request = Request.Builder().url("$baseUrl/blocked-chats").header("token", token).build()
+        val arr = executeJsonArray(request)
+        val result = LinkedHashMap<String, BlockedAccount>()
+        for (i in 0 until arr.length()) {
+            val participants = arr.getJSONObject(i).optJSONArray("participants") ?: continue
+            for (j in 0 until participants.length()) {
+                val p = participants.getJSONObject(j)
+                val address = p.optStringOrNull("_id") ?: p.optStringOrNull("account") ?: continue
+                if (address == myAddress || result.containsKey(address)) continue
+                result[address] = BlockedAccount(
+                    address = address,
+                    name = p.optStringOrNull("name"),
+                    avatarUrl = avatarUrl(p.optJSONObject("profilePicture")?.optStringOrNull("url")),
+                )
+            }
+        }
+        return result.values.toList()
     }
 
     /** Mirrors the phone app's image proxy (ProfilePicture.tsx) so avatar URLs are resized/cached. */

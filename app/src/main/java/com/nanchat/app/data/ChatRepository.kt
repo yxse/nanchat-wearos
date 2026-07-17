@@ -9,6 +9,7 @@ import com.nanchat.app.crypto.NanoCrypto
 import com.nanchat.app.network.ApiException
 import com.nanchat.app.network.ChatApi
 import com.nanchat.app.network.ChatSocket
+import com.nanchat.app.network.OwnProfile
 import com.nanchat.app.notifications.AppForeground
 import com.nanchat.app.notifications.NotificationHelper
 import com.google.firebase.messaging.FirebaseMessaging
@@ -19,8 +20,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
@@ -73,8 +77,28 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
     private val _session = MutableStateFlow<Session>(Session.LoggedOut)
     val session: StateFlow<Session> = _session.asStateFlow()
 
+    /** All non-blocked chats fetched from the server (`/chats` already excludes blocked ones) -
+     * unfiltered by the local hide list, since lookups like [startChatWithUsername]'s "already have
+     * this chat" check need to see hidden chats too. [chats] is the hidden-filtered view for display. */
     private val _chats = MutableStateFlow<List<Chat>>(emptyList())
-    val chats: StateFlow<List<Chat>> = _chats.asStateFlow()
+
+    private val _hiddenChatIds = MutableStateFlow(secureStore.hiddenChatIds)
+
+    val chats: StateFlow<List<Chat>> = combine(_chats, _hiddenChatIds) { all, hidden ->
+        all.filter { it.id !in hidden }
+    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    /** Chats hidden on this device (see [hideChat]), for the Settings "hidden chats" screen. */
+    val hiddenChats: StateFlow<List<Chat>> = combine(_chats, _hiddenChatIds) { all, hidden ->
+        all.filter { it.id in hidden }
+    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    private val _blockedAccounts = MutableStateFlow<List<BlockedAccount>>(emptyList())
+    val blockedAccounts: StateFlow<List<BlockedAccount>> = _blockedAccounts.asStateFlow()
+
+    /** The signed-in account's own name/NanChat ID/avatar, shown at the top of Settings. */
+    private val _ownProfile = MutableStateFlow<OwnProfile?>(null)
+    val ownProfile: StateFlow<OwnProfile?> = _ownProfile.asStateFlow()
 
     private var openChatId: String? = null
     private var openChat: Chat? = null
@@ -234,6 +258,9 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
         chatLoadingOlder.clear()
         _messages.value = emptyList()
         _chats.value = emptyList()
+        _hiddenChatIds.value = emptySet()
+        _blockedAccounts.value = emptyList()
+        _ownProfile.value = null
         _hiddenGroupCount.value = 0
         _stickerCollections.value = emptyList()
         stickersByCollection.clear()
@@ -260,6 +287,7 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
                         onConnected = { socketStatus = SocketStatus.CONNECTED },
                     )
                     loadChats(address, privateKeyHex)
+                    loadOwnProfile()
                     // The socket was disconnected while backgrounded (onAppBackground), so any messages
                     // sent to the currently open conversation in the meantime were never received - pull
                     // the latest page now that we're back on screen, same as first opening it.
@@ -544,8 +572,10 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
             }
         }
         // Only notify for messages from someone else, arriving to a chat that isn't the one currently
-        // open on screen (avoids notifying about our own sends echoed back, or the open conversation).
-        if (decrypted.fromAccount != myAddress && (message.chatId != openChatId || !AppForeground.inForeground)) {
+        // open on screen (avoids notifying about our own sends echoed back, or the open conversation),
+        // and not muted.
+        val chatMuted = _chats.value.find { it.id == message.chatId }?.muted == true
+        if (decrypted.fromAccount != myAddress && !chatMuted && (message.chatId != openChatId || !AppForeground.inForeground)) {
             notifyIncomingMessage(decrypted)
         }
         loadChats(myAddress, privateKeyHex)
@@ -703,6 +733,8 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
                     ?: throw ApiException("No user found with that NanChat ID")
                 val existing = _chats.value.find { it.otherAccount == account.address }
                 if (existing != null) {
+                    // Starting a chat with someone you'd hidden is a clear signal you want it back.
+                    if (existing.id in _hiddenChatIds.value) unhideChat(existing.id)
                     onResult(existing)
                     return@launch
                 }
@@ -737,5 +769,110 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
 
     private fun markChatRead(chatId: String) {
         _chats.value = _chats.value.map { if (it.id == chatId) it.copy(unreadCount = 0) else it }
+    }
+
+    /** Mutes/unmutes a chat server-side - it stays in the list, just without notifications
+     * (see [handleIncomingMessage]'s `chatMuted` check), reversible from the same long-press menu. */
+    fun setChatMuted(chat: Chat, muted: Boolean) {
+        val loggedIn = _session.value as? Session.LoggedIn ?: return
+        _chats.value = _chats.value.map { if (it.id == chat.id) it.copy(muted = muted) else it }
+        scope.launch {
+            try {
+                val token = getValidToken(loggedIn.address, loggedIn.privateKeyHex)
+                withContext(Dispatchers.IO) { api.setChatMuted(token, chat.id, muted) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "setChatMuted failed", e)
+                _error.value = e.message ?: "Could not update mute setting"
+                _chats.value = _chats.value.map { if (it.id == chat.id) it.copy(muted = !muted) else it }
+            }
+        }
+    }
+
+    /** Hides [chat] from the list on this device only (see [SecureStore.hiddenChatIds]) - unlike
+     * [blockChat], the other person is never told and can still message you. Reversible from the
+     * Settings "hidden chats" screen ([unhideChat]) or by starting a chat with them again. */
+    fun hideChat(chatId: String) {
+        val updated = _hiddenChatIds.value + chatId
+        secureStore.hiddenChatIds = updated
+        _hiddenChatIds.value = updated
+    }
+
+    fun unhideChat(chatId: String) {
+        val updated = _hiddenChatIds.value - chatId
+        secureStore.hiddenChatIds = updated
+        _hiddenChatIds.value = updated
+    }
+
+    /** Blocks [chat]'s other participant: removes the chat from the list (the server excludes
+     * blocked chats from `/chats` going forward) and prevents them from messaging again. Reversible
+     * from the Settings "blocked accounts" screen ([unblockAccount]). */
+    fun blockChat(chat: Chat) {
+        val loggedIn = _session.value as? Session.LoggedIn ?: return
+        _chats.value = _chats.value.filter { it.id != chat.id }
+        scope.launch {
+            try {
+                val token = getValidToken(loggedIn.address, loggedIn.privateKeyHex)
+                withContext(Dispatchers.IO) { api.setAccountBlocked(token, chat.otherAccount, blocked = true) }
+                loadBlockedAccounts()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "blockChat failed", e)
+                _error.value = e.message ?: "Could not block"
+                refreshChats()
+            }
+        }
+    }
+
+    /** Fetches the signed-in account's own name/NanChat ID/avatar once per session (see
+     * [_ownProfile]) - called after each successful connect rather than only at login, since the
+     * name is set asynchronously by [createAccount] and may not be readable yet at that point. */
+    fun loadOwnProfile() {
+        val loggedIn = _session.value as? Session.LoggedIn ?: return
+        scope.launch {
+            try {
+                _ownProfile.value = withContext(Dispatchers.IO) { api.fetchOwnProfile(loggedIn.address) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "loadOwnProfile failed", e)
+            }
+        }
+    }
+
+    fun loadBlockedAccounts() {
+        val loggedIn = _session.value as? Session.LoggedIn ?: return
+        scope.launch {
+            try {
+                val token = getValidToken(loggedIn.address, loggedIn.privateKeyHex)
+                _blockedAccounts.value = withContext(Dispatchers.IO) { api.fetchBlockedAccounts(token, loggedIn.address) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "loadBlockedAccounts failed", e)
+            }
+        }
+    }
+
+    fun unblockAccount(address: String) {
+        val loggedIn = _session.value as? Session.LoggedIn ?: return
+        _blockedAccounts.value = _blockedAccounts.value.filter { it.address != address }
+        scope.launch {
+            try {
+                val token = getValidToken(loggedIn.address, loggedIn.privateKeyHex)
+                withContext(Dispatchers.IO) { api.setAccountBlocked(token, address, blocked = false) }
+                // The chat (if any) was dropped from _chats when blocked and nothing else refetches
+                // it - pull it back into the list now that it's unblocked.
+                refreshChats()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "unblockAccount failed", e)
+                _error.value = e.message ?: "Could not unblock"
+                loadBlockedAccounts()
+            }
+        }
     }
 }

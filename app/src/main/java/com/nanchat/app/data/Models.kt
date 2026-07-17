@@ -12,9 +12,15 @@ data class Chat(
     val lastMessagePreview: String? = null,
     val otherName: String? = null,
     val otherAvatarUrl: String? = null,
+    val muted: Boolean = false,
 ) {
     val isPrivate: Boolean get() = type != "group"
 }
+
+/** An account the signed-in user has blocked (`/block-chat`) - listed in Settings so the block can
+ * be reversed. Unlike [Chat], this isn't necessarily a chat the user has: blocking someone by
+ * address alone (before any chat exists) still shows up here (see `/blocked-chats`). */
+data class BlockedAccount(val address: String, val name: String?, val avatarUrl: String?)
 
 data class Message(
     val id: String,

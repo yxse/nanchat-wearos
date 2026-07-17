@@ -31,11 +31,18 @@ class SecureStore(context: Context) {
         get() = prefs.getLong(KEY_TOKEN_EXPIRES, 0L)
         set(value) = prefs.edit().putLong(KEY_TOKEN_EXPIRES, value).apply()
 
+    /** Chat ids hidden from the chat list on this device only - unlike muting/blocking, there's no
+     * server-side "hide" concept, so this never syncs to other devices or to the other participant. */
+    var hiddenChatIds: Set<String>
+        get() = prefs.getStringSet(KEY_HIDDEN_CHAT_IDS, emptySet()).orEmpty()
+        set(value) = prefs.edit().putStringSet(KEY_HIDDEN_CHAT_IDS, value).apply()
+
     fun clear() = prefs.edit().clear().apply()
 
     companion object {
         private const val KEY_SEED = "seed"
         private const val KEY_TOKEN = "chat_token"
         private const val KEY_TOKEN_EXPIRES = "chat_token_expires_at"
+        private const val KEY_HIDDEN_CHAT_IDS = "hidden_chat_ids"
     }
 }
