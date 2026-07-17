@@ -1,6 +1,7 @@
 package com.nanchat.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.VpnKey
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,6 +30,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -39,6 +43,8 @@ import androidx.wear.compose.foundation.lazy.items
 import androidx.wear.compose.foundation.lazy.rememberTransformingLazyColumnState
 import androidx.wear.compose.foundation.pager.HorizontalPager
 import androidx.wear.compose.foundation.pager.rememberPagerState
+import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
+import androidx.wear.compose.foundation.rotary.rotaryScrollable
 import androidx.wear.compose.material3.AppScaffold
 import androidx.wear.compose.material3.Button
 import androidx.wear.compose.material3.Card
@@ -178,13 +184,23 @@ private fun ChatListPage(
 private fun SettingsPage(appVersion: String, onShowSeed: () -> Unit, onLogout: () -> Unit) {
     var confirmingLogout by remember { mutableStateOf(false) }
     val scrollState = rememberScrollState()
+    // verticalScroll (unlike TransformingLazyColumn on the chat list) has no built-in rotary
+    // (crown/bezel) support - it only delivers scroll events to a focused element.
+    val rotaryFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { rotaryFocusRequester.requestFocus() }
     ScreenScaffold(scrollState = scrollState) { contentPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(contentPadding)
                 .padding(horizontal = 14.dp)
-                .verticalScroll(scrollState),
+                .verticalScroll(scrollState)
+                .rotaryScrollable(
+                    behavior = RotaryScrollableDefaults.behavior(scrollableState = scrollState),
+                    focusRequester = rotaryFocusRequester,
+                )
+                .focusRequester(rotaryFocusRequester)
+                .focusable(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.height(4.dp))
