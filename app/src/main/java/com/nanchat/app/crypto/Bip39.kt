@@ -3,6 +3,7 @@ package com.nanchat.app.crypto
 import android.content.Context
 import com.nanchat.app.R
 import java.security.MessageDigest
+import java.security.SecureRandom
 
 /**
  * Converts between a 24-word mnemonic and the 32-byte legacy Nano seed, matching multi-nano-web's
@@ -31,6 +32,20 @@ object Bip39 {
     }
 
     fun isKnownWord(word: String): Boolean = words.contains(word.trim().lowercase())
+
+    /** Generates a fresh 32-byte legacy Nano seed (the entropy for a brand new 24-word mnemonic). */
+    fun generateSeed(): String {
+        val bytes = ByteArray(32)
+        SecureRandom().nextBytes(bytes)
+        return bytes.toHex()
+    }
+
+    /** Inverse of [mnemonicToSeed]: re-encodes a seed's entropy as its 24-word mnemonic, for display. */
+    fun seedToMnemonic(seedHex: String): List<String> {
+        val entropyBits = seedHex.hexToBytes().joinToString("") { b -> (b.toInt() and 0xFF).toString(2).padStart(8, '0') }
+        val bits = entropyBits + checksumBits(seedHex)
+        return (0 until WORD_COUNT).map { i -> words[bits.substring(i * 11, i * 11 + 11).toInt(2)] }
+    }
 
     fun mnemonicToSeed(mnemonicWords: List<String>): String {
         require(mnemonicWords.size == WORD_COUNT) { "Exactly 24 words are required" }

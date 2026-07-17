@@ -19,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.SwipeToDismissBox
 import com.nanchat.app.NanChatApplication
@@ -31,10 +32,12 @@ import com.nanchat.app.ui.ChatListScreen
 import com.nanchat.app.ui.ChatScreen
 import com.nanchat.app.ui.NewChatScreen
 import com.nanchat.app.ui.OnboardingScreen
+import com.nanchat.app.ui.SeedScreen
 
 private sealed interface NavScreen {
     data object ChatList : NavScreen
     data object NewChat : NavScreen
+    data object ShowSeed : NavScreen
     data class ChatDetail(val chat: Chat) : NavScreen
 }
 
@@ -77,6 +80,10 @@ private fun NanChatApp(repository: ChatRepository) {
     val stickerCollections by repository.stickerCollections.collectAsState()
 
     var nav by remember { mutableStateOf<NavScreen>(NavScreen.ChatList) }
+    val context = LocalContext.current
+    val appVersion = remember(context) {
+        context.packageManager.getPackageInfo(context.packageName, 0).versionName.orEmpty()
+    }
 
     // Requested once the user is actually logged in - not unconditionally at cold start - since
     // notifications only become relevant once there's an account that can receive messages (Wear
@@ -94,6 +101,7 @@ private fun NanChatApp(repository: ChatRepository) {
             OnboardingScreen(
                 error = error,
                 onImportMnemonic = { words -> repository.loginWithMnemonic(words) },
+                onCreateAccount = { seed, name -> repository.createAccount(seed, name) },
                 onDismissError = { repository.clearError() },
             )
         }
@@ -105,13 +113,29 @@ private fun NanChatApp(repository: ChatRepository) {
                         loading = loading,
                         error = error,
                         hiddenGroupCount = hiddenGroupCount,
+                        appVersion = appVersion,
                         onOpenChat = { chat ->
                             repository.openChat(chat)
                             nav = NavScreen.ChatDetail(chat)
                         },
                         onNewChat = { nav = NavScreen.NewChat },
                         onRetry = { repository.refreshChats() },
+                        onShowSeed = { nav = NavScreen.ShowSeed },
+                        onLogout = {
+                            nav = NavScreen.ChatList
+                            repository.logout()
+                        },
                     )
+                }
+                is NavScreen.ShowSeed -> {
+                    BackHandler { nav = NavScreen.ChatList }
+                    SwipeToDismissBox(onDismissed = { nav = NavScreen.ChatList }) { isBackground ->
+                        if (isBackground) {
+                            Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
+                        } else {
+                            SeedScreen(mnemonic = repository.currentMnemonic().orEmpty())
+                        }
+                    }
                 }
                 is NavScreen.NewChat -> {
                     // SwipeToDismissBox gives a generous swipe area (not just the outer pixel

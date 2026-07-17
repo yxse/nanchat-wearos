@@ -101,6 +101,7 @@ dependencies {
     }
     implementation(libs.jna) { artifact { type = "aar" } }
     implementation(libs.coil.compose)
+    implementation(libs.coil.svg)
     implementation(libs.material.icons.extended)
     implementation(libs.graphics.shapes)
     implementation(libs.core.ktx)

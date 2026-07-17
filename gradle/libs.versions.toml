@@ -35,6 +35,7 @@ eddsa = { group = "net.i2p.crypto", name = "eddsa", version.ref = "eddsa" }
 lazysodium-android = { group = "com.goterl", name = "lazysodium-android", version.ref = "lazysodium" }
 jna = { group = "net.java.dev.jna", name = "jna", version.ref = "jna" }
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
+coil-svg = { group = "io.coil-kt", name = "coil-svg", version.ref = "coil" }
 material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
 graphics-shapes = { group = "androidx.graphics", name = "graphics-shapes", version = "1.0.1" }
 compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }

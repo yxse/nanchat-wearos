@@ -78,6 +78,8 @@ import kotlin.math.absoluteValue
 private sealed interface Step {
     data object Intro : Step
     data class Import(val words: List<String>, val index: Int) : Step
+    data class CreateBackup(val seed: String, val mnemonic: List<String>) : Step
+    data class CreateName(val seed: String) : Step
 }
 
 private data class IntroSlide(
@@ -120,13 +122,18 @@ private fun slideBackgroundColor(index: Int): Color = when (index) {
 fun OnboardingScreen(
     error: String?,
     onImportMnemonic: (List<String>) -> Unit,
+    onCreateAccount: (seed: String, name: String) -> Unit,
     onDismissError: () -> Unit,
 ) {
     var step by remember { mutableStateOf<Step>(Step.Intro) }
 
     when (val s = step) {
         is Step.Intro -> IntroScreen(
-            onGetStarted = { step = Step.Import(List(Bip39.WORD_COUNT) { "" }, 0) },
+            onCreateNew = {
+                val seed = Bip39.generateSeed()
+                step = Step.CreateBackup(seed, Bip39.seedToMnemonic(seed))
+            },
+            onImportExisting = { step = Step.Import(List(Bip39.WORD_COUNT) { "" }, 0) },
             error = error,
         )
         is Step.Import -> WordEntryScreen(
@@ -148,6 +155,17 @@ fun OnboardingScreen(
                 }
             },
         )
+        is Step.CreateBackup -> BackupSeedScreen(
+            mnemonic = s.mnemonic,
+            onBack = { step = Step.Intro },
+            onNext = { step = Step.CreateName(s.seed) },
+        )
+        is Step.CreateName -> CreateNameScreen(
+            error = error,
+            onDismissError = onDismissError,
+            onBack = { step = Step.CreateBackup(s.seed, Bip39.seedToMnemonic(s.seed)) },
+            onConfirm = { name -> onCreateAccount(s.seed, name) },
+        )
     }
 }
 
@@ -158,7 +176,7 @@ fun OnboardingScreen(
  * background per slide, a white icon bubble, bold title, a subtle bottom progress arc, and a
  * pill-shaped white CTA button on the final slide. */
 @Composable
-private fun IntroScreen(onGetStarted: () -> Unit, error: String?) {
+private fun IntroScreen(onCreateNew: () -> Unit, onImportExisting: () -> Unit, error: String?) {
     val pagerState = rememberPagerState(pageCount = { introSlides.size })
     val scope = rememberCoroutineScope()
     val isLastPage = pagerState.currentPage == introSlides.lastIndex
@@ -278,18 +296,36 @@ private fun IntroScreen(onGetStarted: () -> Unit, error: String?) {
                         if (showGetStarted) {
                             // Pill CTA with a leading arrow, using the theme's primary/on-primary
                             // pairing (Button's own defaults) for high contrast on the dark slide bg.
-                            Button(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                                onClick = onGetStarted,
-                                shape = CircleShape,
-                                icon = {
-                                    Icon(
-                                        Icons.AutoMirrored.Outlined.ArrowForward,
-                                        contentDescription = null,
-                                    )
-                                },
+                            // A new identity is just a locally generated key (per the "No accounts -
+                            // just your key" slide) - "Create account" is the primary path, with
+                            // restoring an existing phrase as a secondary text action underneath.
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp),
                             ) {
-                                Text("Get started")
+                                Button(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onClick = onCreateNew,
+                                    shape = CircleShape,
+                                ) {
+                                    Text(
+                                        "Create account",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                TextButton(onClick = onImportExisting) {
+                                    Text(
+                                        "Restore",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
                             }
                         } else {
                             TextButton(onClick = { scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) } }) {
@@ -410,6 +446,164 @@ private fun WordEntryScreen(
                         } else null,
                     ) {
                         Text(if (index == Bip39.WORD_COUNT - 1) "Confirm" else "Next")
+                    }
+                }
+                if (error != null) {
+                    Spacer(Modifier.height(10.dp))
+                    ErrorCard(error, onRetry = onDismissError)
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+    }
+}
+
+/** Shows the freshly generated 24-word recovery phrase before it's ever saved anywhere, "tap to
+ * reveal" like the phone app's MnemonicWords component (old/NanChat/src/components/Initialize/
+ * create/Mnemonic.tsx) - hidden by default so it isn't shoulder-surfed by accident while setting up. */
+@Composable
+private fun BackupSeedScreen(mnemonic: List<String>, onBack: () -> Unit, onNext: () -> Unit) {
+    var revealed by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
+    AppScaffold {
+        ScreenScaffold(scrollState = scrollState) { contentPadding ->
+            Column(
+                modifier = Modifier
+                    .padding(contentPadding)
+                    .padding(horizontal = 14.dp)
+                    .verticalScroll(scrollState),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Your recovery phrase",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "Write it down. It's the only way to recover your account - never share it.",
+                    style = MaterialTheme.typography.bodyExtraSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(10.dp))
+                MnemonicGrid(mnemonic = mnemonic, revealed = revealed, onToggle = { revealed = !revealed })
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    OutlinedIconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                    }
+                    Button(modifier = Modifier.weight(1f), onClick = onNext) {
+                        Text("Next", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+    }
+}
+
+/** Numbered word list shared by [BackupSeedScreen] and the Settings "show recovery phrase" screen -
+ * one word per row (not a 2-column grid): even the smallest round Wear screens aren't wide enough to
+ * fit two boxes side by side without ellipsizing longer wordlist entries. */
+@Composable
+internal fun MnemonicGrid(mnemonic: List<String>, revealed: Boolean, onToggle: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+        mnemonic.forEachIndexed { index, word ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    text = "${index + 1}.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = if (revealed) word else "••••••",
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+        }
+        Spacer(Modifier.height(2.dp))
+        FilledTonalButton(onClick = onToggle) {
+            Text(if (revealed) "Hide" else "Tap to reveal")
+        }
+    }
+}
+
+@Composable
+private fun CreateNameScreen(
+    error: String?,
+    onDismissError: () -> Unit,
+    onBack: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var input by remember { mutableStateOf(TextFieldValue("")) }
+    val isValid = input.text.trim().isNotEmpty() && input.text.trim().length <= 24
+    val scrollState = rememberScrollState()
+
+    AppScaffold {
+        ScreenScaffold(scrollState = scrollState) { contentPadding ->
+            Column(
+                modifier = Modifier
+                    .padding(contentPadding)
+                    .padding(horizontal = 14.dp)
+                    .verticalScroll(scrollState),
+            ) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "Choose a name",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(8.dp))
+                BasicTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    singleLine = true,
+                    textStyle = TextStyle(
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = MaterialTheme.typography.titleMedium.fontSize,
+                        textAlign = TextAlign.Center,
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape)
+                        .padding(vertical = 12.dp, horizontal = 16.dp),
+                )
+                Spacer(Modifier.height(14.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedIconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back")
+                    }
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        onClick = { onConfirm(input.text.trim()) },
+                        enabled = isValid,
+                    ) {
+                        Text("Create", maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 if (error != null) {

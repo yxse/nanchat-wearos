@@ -113,6 +113,23 @@ class ChatApi(private val baseUrl: String = "https://api.nanchat.com") {
         Sticker(id = s.optString("_id"), url = s.optString("url"), name = s.optStringOrNull("name"))
     }
 
+    /**
+     * Sets the account's display name (`/set-name`, matching the phone app's Register.tsx). This is
+     * also what registers the account server-side on first call, assigning it a random NanChat
+     * username - there's no user-chosen handle at signup, only this display name.
+     */
+    fun setName(token: String, name: String, account: String) {
+        val body = JSONObject()
+            .put("name", name)
+            .put("account", account)
+            .put("version", 2)
+            .toString()
+            .toRequestBody(JSON_MEDIA_TYPE)
+        val request = Request.Builder().url("$baseUrl/set-name").header("token", token).post(body).build()
+        val json = executeJsonObject(request)
+        if (json.has("error")) throw ApiException(json.getString("error"))
+    }
+
     /** Registers this device's FCM token for push notifications. No auth token required
      * (matches the mobile app - see NanChat/src/nano/notifications.ts). */
     fun registerPushToken(fcmToken: String, address: String) {

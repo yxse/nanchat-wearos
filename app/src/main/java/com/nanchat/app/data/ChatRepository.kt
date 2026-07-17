@@ -45,6 +45,17 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
          * single attempt, both for the socket connection and for FCM push token registration. */
         private const val MAX_CONNECT_RETRIES = 4
         private const val MAX_PUSH_TOKEN_RETRIES = 4
+
+        /** The account every new registration gets a default chat with (see register.js's
+         * `createChat([account, DEFAULT_CHAT_ADDRESS], ...)`), matching the phone app's TEAM_ACCOUNT. */
+        private const val TEAM_ACCOUNT = "nano_1aotdujz8ypijprua9fkerxr9nifbj8bbq5edgztjif45qr3g6fbd1cxenij"
+
+        /** Sentinel the server stores as `lastMessage` for that default chat (register.js) instead of
+         * real encrypted content - there's no actual message row behind it, so it must never be passed
+         * to [NanoCrypto.boxDecrypt]. */
+        private const val WELCOME_SENTINEL = "welcome_message"
+        private const val WELCOME_TEXT = "Welcome to NanChat! Send and receive Nano instantly, anywhere, with zero fees."
+        private const val WELCOME_MESSAGE_ID = "welcome"
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -166,8 +177,68 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
         return loginWithSeed(seed)
     }
 
+    /**
+     * Creates a brand new account from a freshly generated [seed] (see [Bip39.generateSeed] - the
+     * caller shows it to the user as a recovery-phrase backup before this is called) and sets
+     * [displayName] as its NanChat name, which also registers it server-side (see
+     * [com.nanchat.app.network.ChatApi.setName]).
+     */
+    fun createAccount(seed: String, displayName: String) {
+        val trimmed = displayName.trim()
+        if (trimmed.isEmpty()) {
+            _error.value = "Enter a name to continue"
+            return
+        }
+        if (trimmed.length > 24) {
+            _error.value = "Name must be 24 characters or fewer"
+            return
+        }
+        secureStore.seed = seed
+        secureStore.chatToken = null
+        restoreSession(seed)
+        val account = NanoCrypto.deriveAccount(seed)
+        scope.launch {
+            try {
+                val token = getValidToken(account.address, account.privateKeyHex)
+                withContext(Dispatchers.IO) { api.setName(token, trimmed, account.address) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "createAccount: setName failed", e)
+                _error.value = e.message ?: "Could not set your name"
+            }
+        }
+    }
+
     fun clearError() {
         _error.value = null
+    }
+
+    /** The signed-in account's recovery phrase, re-derived from the stored seed for display in Settings. */
+    fun currentMnemonic(): List<String>? = secureStore.seed?.let { Bip39.seedToMnemonic(it) }
+
+    /** Wipes the local seed/session - this is a non-custodial wallet, so there is nothing server-side
+     * to "delete": once the seed is gone from this device, only a backed-up recovery phrase can
+     * restore the account. */
+    fun logout() {
+        connectJob?.cancel()
+        connectJob = null
+        socket.disconnect()
+        socketStatus = SocketStatus.DISCONNECTED
+        secureStore.clear()
+        openChatId = null
+        openChat = null
+        profileCache.clear()
+        decryptedMessageCache.clear()
+        chatHasMoreOlder.clear()
+        chatLoadingOlder.clear()
+        _messages.value = emptyList()
+        _chats.value = emptyList()
+        _hiddenGroupCount.value = 0
+        _stickerCollections.value = emptyList()
+        stickersByCollection.clear()
+        _error.value = null
+        _session.value = Session.LoggedOut
     }
 
     private fun connectAndLoad(address: String, privateKeyHex: String) {
@@ -272,11 +343,15 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
 
     /**
      * `/chats` embeds the other participant's name/avatar when the server already knows them, but not
-     * always (e.g. brand new chats). For those, fall back to the same per-account lookup the phone app
-     * uses (`/account?account=`), same as ProfileNameLookup does client-side there.
+     * always (e.g. brand new chats, or the default "NanChat Team" welcome chat which has a name but no
+     * embedded avatar). For those, fall back to the same per-account lookup the phone app's
+     * ProfilePicture component does client-side (`/account?account=`) - keyed on either field being
+     * missing, not just the name, matching that component's `src == null` check.
      */
     private fun enrichMissingProfiles() {
-        val toResolve = _chats.value.filter { it.otherName.isNullOrEmpty() && !profileCache.containsKey(it.otherAccount) }
+        val toResolve = _chats.value.filter {
+            (it.otherName.isNullOrEmpty() || it.otherAvatarUrl == null) && !profileCache.containsKey(it.otherAccount)
+        }
         if (toResolve.isEmpty()) return
         scope.launch {
             for (chat in toResolve) {
@@ -291,7 +366,9 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
                 val (name, avatarUrl) = profile
                 if (name != null || avatarUrl != null) {
                     _chats.value = _chats.value.map {
-                        if (it.otherAccount == chat.otherAccount) it.copy(otherName = name, otherAvatarUrl = avatarUrl) else it
+                        if (it.otherAccount == chat.otherAccount) {
+                            it.copy(otherName = name ?: it.otherName, otherAvatarUrl = avatarUrl ?: it.otherAvatarUrl)
+                        } else it
                     }
                 }
             }
@@ -318,6 +395,23 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
         openChatId = chat.id
         openChat = chat
         val chatCache = decryptedMessageCache.getOrPut(chat.id) { mutableMapOf() }
+        // The default "NanChat Team" chat (see TEAM_ACCOUNT) has no real message behind its welcome
+        // text server-side (register.js only sets the chat's lastMessage summary, never inserts an
+        // actual message row) - the phone app renders it as a fixed client-side element instead
+        // (ChatRoom.tsx's `chat.creator === TEAM_ACCOUNT ? <WelcomeMessage />`); mirror that here as a
+        // synthetic leading message so the conversation isn't just empty.
+        if (chat.otherAccount == TEAM_ACCOUNT && WELCOME_MESSAGE_ID !in chatCache) {
+            chatCache[WELCOME_MESSAGE_ID] = Message(
+                id = WELCOME_MESSAGE_ID,
+                chatId = chat.id,
+                contentEncrypted = "",
+                fromAccount = TEAM_ACCOUNT,
+                toAccount = loggedIn.address,
+                timestamp = "",
+                height = -1,
+                decrypted = WELCOME_TEXT,
+            )
+        }
         // Show whatever we've already decrypted this session immediately - reopening a conversation
         // you've already viewed shouldn't flash the loading indicator or redo native decryption.
         _messages.value = chatCache.values.sortedBy { it.height }
@@ -426,6 +520,7 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
 
     private fun decryptPreview(chat: Chat, privateKeyHex: String): String? {
         val encrypted = chat.lastMessageEncrypted ?: return null
+        if (encrypted == WELCOME_SENTINEL) return WELCOME_TEXT
         return try {
             NanoCrypto.boxDecrypt(encrypted, chat.otherAccount, privateKeyHex)
         } catch (e: Exception) {

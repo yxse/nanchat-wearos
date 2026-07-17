@@ -3,6 +3,7 @@ package com.nanchat.app
 import android.app.Application
 import coil.ImageLoader
 import coil.ImageLoaderFactory
+import coil.decode.SvgDecoder
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.nanchat.app.crypto.Bip39
@@ -20,6 +21,7 @@ class NanChatApplication : Application(), ImageLoaderFactory {
     // Stickers (and avatars) should stay fully cached once fetched, so reopening the picker never
     // re-downloads them - a generous, persistent disk cache independent of server cache headers.
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
+        .components { add(SvgDecoder.Factory()) } // some profile pictures (e.g. the "NanChat Team" account) are .svg
         .memoryCache {
             MemoryCache.Builder(this)
                 .maxSizePercent(0.25)
