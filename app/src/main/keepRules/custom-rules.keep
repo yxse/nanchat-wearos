@@ -1,3 +1,0 @@
-# net.i2p.crypto.eddsa optionally falls back to JDK-internal X509 key handling that
-# doesn't exist on Android; that code path isn't exercised by this app's usage.
--dontwarn sun.security.x509.X509Key
