@@ -6,13 +6,14 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items as gridItems
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,8 +62,11 @@ fun StickerPickerScreen(
     val allLoaded = collections.isNotEmpty() && collections.all { stickersByCollection.containsKey(it.id) }
     val stickers = collections.flatMap { stickersByCollection[it.id].orEmpty() }
     val gridShown = collections.isNotEmpty() && (allLoaded || stickers.isNotEmpty())
+    // Rows of 3 rather than LazyVerticalGrid: Wear Material3's ScreenScaffold/ScrollIndicator only
+    // wire up automatically from a LazyListState, so a plain LazyColumn is what gets the scrollbar.
+    val stickerRows = stickers.chunked(3)
 
-    val gridState = rememberLazyGridState()
+    val listState = rememberLazyListState()
     val rotaryFocusRequester = remember { FocusRequester() }
     // The grid only enters composition once stickers are loaded, so requesting focus once at
     // startup would target a focusRequester with nothing attached yet - retry once it's shown.
@@ -71,7 +75,7 @@ fun StickerPickerScreen(
     }
 
     AppScaffold {
-        ScreenScaffold { contentPadding ->
+        ScreenScaffold(scrollState = listState) { contentPadding ->
             Box(modifier = Modifier.fillMaxSize().padding(contentPadding)) {
                 if (collections.isEmpty()) {
                     Text(
@@ -86,31 +90,40 @@ fun StickerPickerScreen(
                         modifier = Modifier.align(Alignment.Center),
                     )
                 } else {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(3),
-                        state = gridState,
+                    LazyColumn(
+                        state = listState,
                         contentPadding = PaddingValues(8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier
                             .fillMaxSize()
                             .rotaryScrollable(
-                                behavior = RotaryScrollableDefaults.behavior(scrollableState = gridState),
+                                behavior = RotaryScrollableDefaults.behavior(scrollableState = listState),
                                 focusRequester = rotaryFocusRequester,
                             )
                             .focusRequester(rotaryFocusRequester)
                             .focusable(),
                     ) {
-                        gridItems(stickers, key = { it.id }) { sticker ->
-                            AsyncImage(
-                                model = sticker.url,
-                                contentDescription = sticker.name,
-                                contentScale = ContentScale.Fit,
-                                modifier = Modifier
-                                    .aspectRatio(1f)
-                                    .clip(MaterialTheme.shapes.small)
-                                    .clickable { onStickerSelected(sticker.url) },
-                            )
+                        items(stickerRows, key = { row -> row.first().id }) { row ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                row.forEach { sticker ->
+                                    AsyncImage(
+                                        model = sticker.url,
+                                        contentDescription = sticker.name,
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .aspectRatio(1f)
+                                            .clip(MaterialTheme.shapes.small)
+                                            .clickable { onStickerSelected(sticker.url) },
+                                    )
+                                }
+                                repeat(3 - row.size) {
+                                    Box(modifier = Modifier.weight(1f))
+                                }
+                            }
                         }
                     }
                 }

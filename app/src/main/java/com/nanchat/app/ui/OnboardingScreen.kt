@@ -349,13 +349,14 @@ private fun WordEntryScreen(
     val suggestions = remember(input.text) { Bip39.suggestions(input.text) }
     val isValid = Bip39.isKnownWord(input.text)
 
+    val scrollState = rememberScrollState()
     AppScaffold {
-        ScreenScaffold { contentPadding ->
+        ScreenScaffold(scrollState = scrollState) { contentPadding ->
             Column(
                 modifier = Modifier
                     .padding(contentPadding)
                     .padding(horizontal = 14.dp)
-                    .verticalScroll(rememberScrollState()),
+                    .verticalScroll(scrollState),
             ) {
                 Spacer(Modifier.height(6.dp))
                 Text(
