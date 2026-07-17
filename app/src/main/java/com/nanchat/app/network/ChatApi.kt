@@ -239,7 +239,18 @@ class ChatApi(private val baseUrl: String = "https://api.nanchat.com") {
             otherName = otherParticipant?.optStringOrNull("name"),
             otherAvatarUrl = avatarUrl(otherParticipant?.optJSONObject("profilePicture")?.optStringOrNull("url")),
             muted = obj.optBoolean("muted", false),
+            accepted = obj.optBoolean("accepted", true),
+            creator = obj.optStringOrNull("creator"),
         )
+    }
+
+    /** Marks a chat someone else started as accepted (`/accept-chat`) - the phone app's "Accept"
+     * button on an unaccepted chat's message-request banner. */
+    fun acceptChat(token: String, chatId: String) {
+        val body = JSONObject().put("chatId", chatId).toString().toRequestBody(JSON_MEDIA_TYPE)
+        val request = Request.Builder().url("$baseUrl/accept-chat").header("token", token).post(body).build()
+        val json = executeJsonObject(request)
+        if (json.has("error")) throw ApiException(json.getString("error"))
     }
 
     /** Mutes/unmutes a chat (`/mute`, `/unmute`) - the chat stays in `/chats`, just without

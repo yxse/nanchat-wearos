@@ -36,6 +36,10 @@ class NanChatMessagingService : FirebaseMessagingService() {
 
         val data = remoteMessage.data
         val chatId = data["chatId"] ?: remoteMessage.messageId ?: return
+        // Muted/blocked/unaccepted chats are already excluded server-side before this push is even
+        // sent (sendPushNewMessage in server_notifications.js) - but "hidden" is a watch-only concept
+        // the server doesn't know about, so it's the one case that still needs checking here.
+        if (chatId in SecureStore(applicationContext).hiddenChatIds) return
         val fromAccount = data["fromAccount"]
         val title = data["fromAccountName"]?.takeIf { it.isNotBlank() }
             ?: fromAccount

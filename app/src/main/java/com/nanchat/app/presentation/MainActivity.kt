@@ -32,9 +32,13 @@ import com.nanchat.app.ui.BlockedHiddenScreen
 import com.nanchat.app.ui.ChatActionMenu
 import com.nanchat.app.ui.ChatListScreen
 import com.nanchat.app.ui.ChatScreen
+import com.nanchat.app.ui.ConfirmReversalScreen
+import com.nanchat.app.ui.MessageRequestScreen
 import com.nanchat.app.ui.NewChatScreen
 import com.nanchat.app.ui.OnboardingScreen
+import com.nanchat.app.ui.PendingReversal
 import com.nanchat.app.ui.SeedScreen
+import com.nanchat.app.ui.util.shortAddress
 
 private sealed interface NavScreen {
     data object ChatList : NavScreen
@@ -43,6 +47,8 @@ private sealed interface NavScreen {
     data object BlockedAndHidden : NavScreen
     data class ChatDetail(val chat: Chat) : NavScreen
     data class ChatMenu(val chat: Chat) : NavScreen
+    data class MessageRequest(val chat: Chat) : NavScreen
+    data class ConfirmReversal(val target: PendingReversal) : NavScreen
 }
 
 class MainActivity : ComponentActivity() {
@@ -122,9 +128,14 @@ private fun NanChatApp(repository: ChatRepository) {
                         hiddenGroupCount = hiddenGroupCount,
                         appVersion = appVersion,
                         ownProfile = ownProfile,
+                        myAddress = currentSession.address,
                         onOpenChat = { chat ->
-                            repository.openChat(chat)
-                            nav = NavScreen.ChatDetail(chat)
+                            if (chat.isPendingRequest(currentSession.address)) {
+                                nav = NavScreen.MessageRequest(chat)
+                            } else {
+                                repository.openChat(chat)
+                                nav = NavScreen.ChatDetail(chat)
+                            }
                         },
                         onNewChat = { nav = NavScreen.NewChat },
                         onRetry = { repository.refreshChats() },
@@ -174,6 +185,27 @@ private fun NanChatApp(repository: ChatRepository) {
                         }
                     }
                 }
+                is NavScreen.MessageRequest -> {
+                    BackHandler { nav = NavScreen.ChatList }
+                    SwipeToDismissBox(onDismissed = { nav = NavScreen.ChatList }) { isBackground ->
+                        if (isBackground) {
+                            Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
+                        } else {
+                            MessageRequestScreen(
+                                chat = screen.chat,
+                                onAccept = {
+                                    repository.acceptChat(screen.chat)
+                                    repository.openChat(screen.chat)
+                                    nav = NavScreen.ChatDetail(screen.chat)
+                                },
+                                onRefuse = {
+                                    repository.hideChat(screen.chat.id)
+                                    nav = NavScreen.ChatList
+                                },
+                            )
+                        }
+                    }
+                }
                 is NavScreen.BlockedAndHidden -> {
                     BackHandler { nav = NavScreen.ChatList }
                     SwipeToDismissBox(onDismissed = { nav = NavScreen.ChatList }) { isBackground ->
@@ -183,8 +215,41 @@ private fun NanChatApp(repository: ChatRepository) {
                             BlockedHiddenScreen(
                                 blockedAccounts = blockedAccounts,
                                 hiddenChats = hiddenChats,
-                                onUnblock = { address -> repository.unblockAccount(address) },
-                                onUnhide = { chatId -> repository.unhideChat(chatId) },
+                                onRequestUnblock = { account ->
+                                    nav = NavScreen.ConfirmReversal(
+                                        PendingReversal.Unblock(
+                                            address = account.address,
+                                            name = account.name?.takeIf { it.isNotBlank() } ?: shortAddress(account.address),
+                                        ),
+                                    )
+                                },
+                                onRequestUnhide = { chat ->
+                                    nav = NavScreen.ConfirmReversal(
+                                        PendingReversal.Unhide(
+                                            chatId = chat.id,
+                                            name = chat.otherName?.takeIf { it.isNotBlank() } ?: shortAddress(chat.otherAccount),
+                                        ),
+                                    )
+                                },
+                            )
+                        }
+                    }
+                }
+                is NavScreen.ConfirmReversal -> {
+                    BackHandler { nav = NavScreen.BlockedAndHidden }
+                    SwipeToDismissBox(onDismissed = { nav = NavScreen.BlockedAndHidden }) { isBackground ->
+                        if (isBackground) {
+                            Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
+                        } else {
+                            ConfirmReversalScreen(
+                                target = screen.target,
+                                onConfirm = {
+                                    when (val target = screen.target) {
+                                        is PendingReversal.Unblock -> repository.unblockAccount(target.address)
+                                        is PendingReversal.Unhide -> repository.unhideChat(target.chatId)
+                                    }
+                                    nav = NavScreen.BlockedAndHidden
+                                },
                             )
                         }
                     }

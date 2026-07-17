@@ -35,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -78,6 +79,7 @@ fun ChatListScreen(
     hiddenGroupCount: Int,
     appVersion: String,
     ownProfile: OwnProfile?,
+    myAddress: String,
     onOpenChat: (Chat) -> Unit,
     onNewChat: () -> Unit,
     onRetry: () -> Unit,
@@ -96,6 +98,7 @@ fun ChatListScreen(
                         loading = loading,
                         error = error,
                         hiddenGroupCount = hiddenGroupCount,
+                        myAddress = myAddress,
                         onOpenChat = onOpenChat,
                         onNewChat = onNewChat,
                         onRetry = onRetry,
@@ -125,6 +128,7 @@ private fun ChatListPage(
     loading: Boolean,
     error: String?,
     hiddenGroupCount: Int,
+    myAddress: String,
     onOpenChat: (Chat) -> Unit,
     onNewChat: () -> Unit,
     onRetry: () -> Unit,
@@ -192,6 +196,7 @@ private fun ChatListPage(
                     items(chats, key = { it.id }) { chat ->
                         ChatRow(
                             chat = chat,
+                            isPendingRequest = chat.isPendingRequest(myAddress),
                             transformationSpec = transformationSpec,
                             onClick = { onOpenChat(chat) },
                             onLongClick = { onLongPressChat(chat) },
@@ -421,6 +426,7 @@ private fun OwnProfileCard(profile: OwnProfile) {
 @Composable
 private fun TransformingLazyColumnItemScope.ChatRow(
     chat: Chat,
+    isPendingRequest: Boolean,
     transformationSpec: TransformationSpec,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
@@ -453,8 +459,9 @@ private fun TransformingLazyColumnItemScope.ChatRow(
                     }
                 }
                 Text(
-                    text = chat.lastMessagePreview ?: "New chat",
+                    text = if (isPendingRequest) "Message request" else chat.lastMessagePreview ?: "New chat",
                     style = MaterialTheme.typography.bodySmall,
+                    color = if (isPendingRequest) MaterialTheme.colorScheme.primary else Color.Unspecified,
                     maxLines = 1,
                 )
             }

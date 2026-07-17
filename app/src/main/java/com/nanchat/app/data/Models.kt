@@ -13,8 +13,21 @@ data class Chat(
     val otherName: String? = null,
     val otherAvatarUrl: String? = null,
     val muted: Boolean = false,
+    /** Whether the signed-in account has accepted this chat (`/accept-chat`) - the other
+     * participant's chats start unaccepted for everyone but its creator (see `register.js`'s
+     * `createChat`). Defaults true so locally-built chats (e.g. ones we started ourselves) never
+     * need special-casing. */
+    val accepted: Boolean = true,
+    /** The account that started this chat - null only if the server omitted it, in which case
+     * [isPendingRequest] treats the chat as already accepted rather than risk wrongly gating an
+     * existing chat. */
+    val creator: String? = null,
 ) {
     val isPrivate: Boolean get() = type != "group"
+
+    /** True for a chat someone else started with us that we haven't accepted or blocked yet - the
+     * phone app's "message request" state (see NewMessageWarning.tsx's `isNewChat`). */
+    fun isPendingRequest(myAddress: String): Boolean = !accepted && creator != null && creator != myAddress
 }
 
 /** An account the signed-in user has blocked (`/block-chat`) - listed in Settings so the block can

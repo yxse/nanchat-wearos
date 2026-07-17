@@ -225,6 +225,12 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
             try {
                 val token = getValidToken(account.address, account.privateKeyHex)
                 withContext(Dispatchers.IO) { api.setName(token, trimmed, account.address) }
+                // connectAndLoad (triggered by restoreSession above) already called loadOwnProfile()
+                // once, but that /account fetch races this setName call - it usually wins the race,
+                // reading the account before its name is set and leaving Settings stuck showing
+                // "NanChat user" until the next full reconnect. Refresh now that the name is
+                // definitely set server-side.
+                loadOwnProfile()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -288,6 +294,9 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
                     )
                     loadChats(address, privateKeyHex)
                     loadOwnProfile()
+                    // Keeps the blocked-sender check in handleIncomingMessage accurate from the start
+                    // of the session, not just after the user happens to open Settings > Blocked.
+                    loadBlockedAccounts()
                     // The socket was disconnected while backgrounded (onAppBackground), so any messages
                     // sent to the currently open conversation in the meantime were never received - pull
                     // the latest page now that we're back on screen, same as first opening it.
@@ -573,9 +582,16 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
         }
         // Only notify for messages from someone else, arriving to a chat that isn't the one currently
         // open on screen (avoids notifying about our own sends echoed back, or the open conversation),
-        // and not muted.
+        // and not muted, hidden, or blocked - the server's push-notification path already excludes
+        // muted/blocked/unaccepted chats (sendPushNewMessage in server_notifications.js), but the
+        // live socket delivery this handles does not, and "hidden" is a watch-only concept the
+        // server doesn't know about at all, so all three need checking here too.
         val chatMuted = _chats.value.find { it.id == message.chatId }?.muted == true
-        if (decrypted.fromAccount != myAddress && !chatMuted && (message.chatId != openChatId || !AppForeground.inForeground)) {
+        val chatHidden = message.chatId in _hiddenChatIds.value
+        val senderBlocked = _blockedAccounts.value.any { it.address == decrypted.fromAccount }
+        val shouldNotify = decrypted.fromAccount != myAddress && !chatMuted && !chatHidden && !senderBlocked &&
+            (message.chatId != openChatId || !AppForeground.inForeground)
+        if (shouldNotify) {
             notifyIncomingMessage(decrypted)
         }
         loadChats(myAddress, privateKeyHex)
@@ -753,6 +769,8 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
                     height = -1,
                     otherName = account.name,
                     otherAvatarUrl = account.avatarUrl,
+                    accepted = true,
+                    creator = loggedIn.address,
                 )
                 _chats.value = listOf(chat) + _chats.value
                 onResult(chat)
@@ -803,6 +821,26 @@ class ChatRepository(private val secureStore: SecureStore, private val appContex
         val updated = _hiddenChatIds.value - chatId
         secureStore.hiddenChatIds = updated
         _hiddenChatIds.value = updated
+    }
+
+    /** Accepts a chat someone else started with us (see [Chat.isPendingRequest]) - the phone app's
+     * "Accept" button on the message-request banner. Reversible only by blocking afterward; there's
+     * no "un-accept". */
+    fun acceptChat(chat: Chat) {
+        val loggedIn = _session.value as? Session.LoggedIn ?: return
+        _chats.value = _chats.value.map { if (it.id == chat.id) it.copy(accepted = true) else it }
+        scope.launch {
+            try {
+                val token = getValidToken(loggedIn.address, loggedIn.privateKeyHex)
+                withContext(Dispatchers.IO) { api.acceptChat(token, chat.id) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "acceptChat failed", e)
+                _error.value = e.message ?: "Could not accept chat"
+                _chats.value = _chats.value.map { if (it.id == chat.id) it.copy(accepted = false) else it }
+            }
+        }
     }
 
     /** Blocks [chat]'s other participant: removes the chat from the list (the server excludes
