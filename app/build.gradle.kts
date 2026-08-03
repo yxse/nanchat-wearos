@@ -25,8 +25,8 @@ android {
         applicationId = "com.nanchat.app"
         minSdk = 30
         targetSdk = 36
-        versionCode = 9
-        versionName = "1.0.8"
+        versionCode = 11
+        versionName = "1.1.0"
 
     }
 

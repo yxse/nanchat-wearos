@@ -22,10 +22,10 @@
             <InsightsFilterSettings>
               <option name="connection">
                 <ConnectionSetting>
-                  <option name="appId" value="PLACEHOLDER" />
-                  <option name="mobileSdkAppId" value="" />
-                  <option name="projectId" value="" />
-                  <option name="projectNumber" value="" />
+                  <option name="appId" value="com.nanchat.app" />
+                  <option name="mobileSdkAppId" value="1:137198054925:android:1b1a5228828147232aaf44" />
+                  <option name="projectId" value="nanwallet-efce5" />
+                  <option name="projectNumber" value="137198054925" />
                 </ConnectionSetting>
               </option>
               <option name="signal" value="SIGNAL_UNSPECIFIED" />
