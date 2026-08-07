@@ -11,13 +11,15 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.calculateEndPadding
-import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -40,6 +42,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -50,12 +53,16 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.wear.compose.foundation.rotary.RotaryScrollableDefaults
 import androidx.wear.compose.foundation.rotary.rotaryScrollable
@@ -69,25 +76,41 @@ import coil.compose.AsyncImage
 import com.nanchat.app.data.Message
 import com.nanchat.app.data.Sticker
 import com.nanchat.app.data.StickerCollection
+import kotlinx.coroutines.flow.first
+import kotlin.math.sqrt
+
+/** Height of the compose row, both idle (icon pill) and expanded (text field + send button). */
+private val ComposeBarHeight = 56.dp
+
+/** Horizontal padding the message list keeps on top of the scaffold's own content padding. */
+private val ListHorizontalPadding = 8.dp
 
 /**
- * ScreenScaffold's default contentPadding reserves ~10% of the screen height at both the top and
- * bottom (see PaddingDefaults.verticalContentPaddingPercentage in Wear Compose Material3) to keep
- * content clear of the round bezel. That's right for most screens, but it leaves a very visible gap
- * between the compose row and the true bottom of the watch face - the compose row is already a
- * narrow pill shape that reads fine much closer to the edge, so its bottom inset is shrunk here.
+ * Extra horizontal inset that keeps the bottom-most compose row inside a round display.
+ *
+ * The row sits just above the screen's bottom content inset, and that far down a circular screen the
+ * visible width is a chord rather than the full screen width - a full-width row would have its
+ * corners (the send button, the left end of the text field) swallowed by the bezel. This solves for
+ * the widest fully-rounded pill of [barHeight] whose bottom corner arcs still fit inside the display
+ * circle, then returns however much more padding that needs than the [appliedHorizontal] the list
+ * already keeps on each side.
  */
 @Composable
-private fun PaddingValues.withComposeBarBottomInset(): PaddingValues {
-    val layoutDirection = LocalLayoutDirection.current
-    return PaddingValues(
-        start = calculateStartPadding(layoutDirection),
-        top = calculateTopPadding(),
-        end = calculateEndPadding(layoutDirection),
-        bottom = 4.dp,
-    )
+private fun composeBarExtraInset(barHeight: Dp, bottomInset: Dp, appliedHorizontal: Dp): Dp {
+    val configuration = LocalConfiguration.current
+    if (!configuration.isScreenRound) return 0.dp
+    val halfScreen = minOf(configuration.screenWidthDp, configuration.screenHeightDp) / 2f
+    val cornerRadius = barHeight.value / 2f
+    // The centre of the row's bottom corner arc has to stay within (radius - cornerRadius) of the
+    // screen centre for the whole arc to clear the bezel.
+    val limit = halfScreen - cornerRadius
+    val arcCentreY = halfScreen - bottomInset.value - cornerRadius
+    val safeHalfWidth = cornerRadius + sqrt((limit * limit - arcCentreY * arcCentreY).coerceAtLeast(0f))
+    val required = (configuration.screenWidthDp / 2f) - safeHalfWidth
+    return (required.dp - appliedHorizontal).coerceAtLeast(0.dp)
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ChatScreen(
     messages: List<Message>,
@@ -108,6 +131,27 @@ fun ChatScreen(
     val focusRequester = remember { FocusRequester() }
     val rotaryFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+
+    fun stopComposing() {
+        composing = false
+        keyboardController?.hide()
+        // The text field stays mounted (see MessageComposeBar), so focus has to be handed back
+        // explicitly or it would keep holding it - and keep the keyboard one tap away from
+        // reopening - while the icon row is showing.
+        focusManager.clearFocus()
+    }
+
+    // The IME pushes one last editor update as its session is torn down, and it still carries the
+    // text that was in the field. After a send that update lands a few milliseconds *after* the
+    // field was cleared, putting the just-sent message straight back into the input - so the next
+    // tap on the keyboard icon would reopen on the previous message. Updates are only from the user
+    // while the compose row is actually open, so anything arriving after it closed is dropped.
+    fun onInputChange(value: TextFieldValue) {
+        if (composing) {
+            input = value
+        }
+    }
 
     if (showStickerPicker) {
         StickerPickerScreen(
@@ -174,14 +218,34 @@ fun ChatScreen(
         composing = true
     }
 
-    // Consume back presses while composing to just collapse back to the icon row (when nothing was
-    // typed), instead of letting them fall through to the outer navigation back handler, which
-    // would exit the chat entirely.
+    // Whether the keyboard is currently up. Two signals are watched because a Wear IME either
+    // resizes the window (reporting an ime inset) or takes it over full-screen (taking window focus
+    // away from the app), depending on the device's keyboard.
+    val keyboardShowing = rememberUpdatedState(WindowInsets.isImeVisible || !LocalWindowInfo.current.isWindowFocused)
+
+    // Consume back presses while composing so they walk back out of the compose row one step at a
+    // time - keyboard first, then the row itself - instead of falling through to the outer
+    // navigation back handler, which would exit the chat entirely. Any typed text is kept, so
+    // reopening the keyboard picks the draft back up.
     BackHandler(enabled = composing) {
-        if (input.text.isBlank()) {
-            composing = false
-        } else {
+        if (keyboardShowing.value) {
             keyboardController?.hide()
+        } else {
+            stopComposing()
+        }
+    }
+
+    // Dismissing the keyboard with its own close button only hides the IME - it leaves the text
+    // field focused - so without this the compose row would stay expanded over an empty input with
+    // no way back to the icon row. Wait for the keyboard to actually come up, then collapse as soon
+    // as it goes away again with nothing typed (with a draft typed the row stays, so it can still
+    // be sent).
+    LaunchedEffect(composing) {
+        if (!composing) return@LaunchedEffect
+        snapshotFlow { keyboardShowing.value }.first { it }
+        snapshotFlow { keyboardShowing.value }.first { !it }
+        if (input.text.isBlank()) {
+            stopComposing()
         }
     }
 
@@ -208,7 +272,12 @@ fun ChatScreen(
             // instead of being a scrolling list item, with a centered hint that this is a brand new
             // conversation.
             ScreenScaffold { contentPadding ->
-                Box(modifier = Modifier.fillMaxSize().padding(contentPadding.withComposeBarBottomInset())) {
+                val composeBarInset = composeBarExtraInset(
+                    barHeight = ComposeBarHeight,
+                    bottomInset = contentPadding.calculateBottomPadding(),
+                    appliedHorizontal = contentPadding.calculateStartPadding(LocalLayoutDirection.current) + ListHorizontalPadding,
+                )
+                Box(modifier = Modifier.fillMaxSize().padding(contentPadding)) {
                     Text(
                         text = "No messages yet",
                         modifier = Modifier.align(Alignment.Center).padding(horizontal = 24.dp),
@@ -220,7 +289,7 @@ fun ChatScreen(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                            .padding(horizontal = ListHorizontalPadding + composeBarInset, vertical = 4.dp),
                     ) {
                         MessageComposeBar(
                             composing = composing,
@@ -231,16 +300,15 @@ fun ChatScreen(
                                 showStickerPicker = true
                             },
                             value = input,
-                            onValueChange = { input = it },
+                            onValueChange = ::onInputChange,
                             focusRequester = focusRequester,
-                            onDismissEmpty = { composing = false },
+                            onDismissEmpty = ::stopComposing,
                             onSend = {
                                 if (input.text.isNotBlank()) {
                                     onSend(input.text)
                                     input = TextFieldValue("")
                                 }
-                                composing = false
-                                keyboardController?.hide()
+                                stopComposing()
                             },
                         )
                     }
@@ -248,6 +316,12 @@ fun ChatScreen(
             }
         } else {
             ScreenScaffold(scrollState = listState) { contentPadding ->
+                val composeBarInset = composeBarExtraInset(
+                    barHeight = ComposeBarHeight,
+                    bottomInset = contentPadding.calculateBottomPadding(),
+                    appliedHorizontal = contentPadding.calculateStartPadding(LocalLayoutDirection.current) + ListHorizontalPadding,
+                )
+                val roundScreen = LocalConfiguration.current.isScreenRound
                 // reverseLayout anchors the conversation to the bottom of the screen (index 0 = right
                 // above the compose row), the way every chat app lays out messages, instead of them
                 // piling up against the top with dead space underneath when there are only one or two.
@@ -261,38 +335,44 @@ fun ChatScreen(
                     reverseLayout = true,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(contentPadding.withComposeBarBottomInset())
+                        // Messages scroll under the top of the content area, and on a round watch that
+                        // corner of the screen curves away - a right- or left-aligned bubble reaching
+                        // it would spill past the bezel. Clipping to the display's own circle keeps
+                        // every pixel the list draws inside the physical screen.
+                        .then(if (roundScreen) Modifier.clip(CircleShape) else Modifier)
+                        .padding(contentPadding)
                         .rotaryScrollable(
                             behavior = RotaryScrollableDefaults.behavior(scrollableState = listState),
                             focusRequester = rotaryFocusRequester,
                         )
                         .focusRequester(rotaryFocusRequester)
                         .focusable(),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    contentPadding = PaddingValues(horizontal = ListHorizontalPadding, vertical = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.Bottom),
                 ) {
                     item {
-                        MessageComposeBar(
-                            composing = composing,
-                            onMic = ::startVoiceInput,
-                            onKeyboard = ::startComposing,
-                            onStickers = {
-                                onOpenStickerPicker()
-                                showStickerPicker = true
-                            },
-                            value = input,
-                            onValueChange = { input = it },
-                            focusRequester = focusRequester,
-                            onDismissEmpty = { composing = false },
-                            onSend = {
-                                if (input.text.isNotBlank()) {
-                                    onSend(input.text)
-                                    input = TextFieldValue("")
-                                }
-                                composing = false
-                                keyboardController?.hide()
-                            },
-                        )
+                        Box(modifier = Modifier.fillMaxWidth().padding(horizontal = composeBarInset)) {
+                            MessageComposeBar(
+                                composing = composing,
+                                onMic = ::startVoiceInput,
+                                onKeyboard = ::startComposing,
+                                onStickers = {
+                                    onOpenStickerPicker()
+                                    showStickerPicker = true
+                                },
+                                value = input,
+                                onValueChange = ::onInputChange,
+                                focusRequester = focusRequester,
+                                onDismissEmpty = ::stopComposing,
+                                onSend = {
+                                    if (input.text.isNotBlank()) {
+                                        onSend(input.text)
+                                        input = TextFieldValue("")
+                                    }
+                                    stopComposing()
+                                },
+                            )
+                        }
                     }
                     items(messages.asReversed(), key = { it.id }) { message ->
                         MessageBubble(message = message, isMine = message.fromAccount == myAddress)
@@ -381,9 +461,9 @@ private fun MessageComposeBar(
                     .padding(horizontal = 10.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                ComposeRowButton(icon = Icons.Outlined.InsertEmoticon, onClick = onStickers)
-                ComposeRowButton(icon = Icons.Outlined.Mic, onClick = onMic)
-                ComposeRowButton(icon = Icons.Outlined.Keyboard, onClick = onKeyboard)
+                ComposeRowButton(icon = Icons.Outlined.InsertEmoticon, description = "Stickers", onClick = onStickers)
+                ComposeRowButton(icon = Icons.Outlined.Mic, description = "Voice input", onClick = onMic)
+                ComposeRowButton(icon = Icons.Outlined.Keyboard, description = "Keyboard", onClick = onKeyboard)
             }
         }
     }
@@ -420,13 +500,13 @@ private fun MessageComposeBar(
         )
         Spacer(Modifier.width(6.dp))
         IconButton(onClick = onSend) {
-            Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = null)
+            Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = "Send")
         }
     }
 }
 
 @Composable
-private fun ComposeRowButton(icon: ImageVector, onClick: () -> Unit) {
+private fun ComposeRowButton(icon: ImageVector, description: String, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .size(40.dp)
@@ -434,6 +514,6 @@ private fun ComposeRowButton(icon: ImageVector, onClick: () -> Unit) {
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null)
+        Icon(icon, contentDescription = description)
     }
 }
